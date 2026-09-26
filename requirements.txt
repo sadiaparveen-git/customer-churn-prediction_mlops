@@ -7,5 +7,12 @@ uvicorn
 pydantic
 python-dotenv
 joblib
-great-expectations 
+great-expectations
 pytest
+lightgbm
+xgboost
+matplotlib
+seaborn
+statsmodels
+optuna
+ipykernel
