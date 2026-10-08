@@ -32,7 +32,8 @@ def train_model(
         y_train (pd.Series): Training target.
         X_test (pd.DataFrame): Held-out features, used for the logged metrics.
         y_test (pd.Series): Held-out target.
-        threshold (float): Decision threshold applied to predict_proba.
+        threshold (float): Decision threshold applied to predict_proba
+            (the one found by tune_model).
         params (dict): Hyperparameters, e.g. best params from tune_model.
             Falls back to DEFAULT_PARAMS when not given.
 
@@ -41,20 +42,21 @@ def train_model(
     """
     all_params = {**FIXED_PARAMS, **(params or DEFAULT_PARAMS)}
 
-    # Churn is ~27% positive; handled via the lowered threshold below rather
-    # than also weighting the minority class (stacking both just trades
-    # precision for recall without improving F1, so pick one).
+    # Churn is ~27% positive. Imbalance is handled by the lowered threshold
+    # below plus the class weight (scale_pos_weight) that tune_model searches;
+    # DEFAULT_PARAMS carries no weight, so the fallback uses the threshold
+    # alone.
     model = XGBClassifier(**all_params)
 
     # Train model
     model.fit(X_train, y_train)
 
-    # Threshold tuned below 0.5 to catch more churners, per EDA
+    # Threshold comes from tune_model (searched below 0.5 to catch churners)
     proba = model.predict_proba(X_test)[:, 1]
     preds = (proba >= threshold).astype(int)
 
     acc = accuracy_score(y_test, preds)
-    rec = recall_score(y_test, preds)
+    rec = recall_score(y_test, preds, pos_label=1)  # churn-class recall
 
     # Log params, metrics, and model
     mlflow.log_params(all_params)

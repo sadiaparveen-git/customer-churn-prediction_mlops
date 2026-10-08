@@ -30,8 +30,9 @@ def evaluate_model(model, X_test, y_test, threshold: float):
 
     return {
         "accuracy": accuracy_score(y_test, preds),
-        "precision": precision_score(y_test, preds),
-        "recall": recall_score(y_test, preds),
-        "f1": f1_score(y_test, preds),
+        # precision / recall / f1 are for the churn class (label 1)
+        "precision": precision_score(y_test, preds, pos_label=1),
+        "recall": recall_score(y_test, preds, pos_label=1),
+        "f1": f1_score(y_test, preds, pos_label=1),
         "roc_auc": roc_auc_score(y_test, proba),  # threshold-independent
     }

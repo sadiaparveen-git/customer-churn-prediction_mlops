@@ -4,14 +4,15 @@ End-to-end churn pipeline, run sequentially:
 load -> validate -> preprocess -> feature engineering -> split
 -> tune -> train (with best params) -> evaluate -> save serving artifacts
 
-All run-level configuration (MLflow URI, experiment name, decision threshold,
-split size) lives here. The src/ modules only contain the logic.
+All run-level configuration (MLflow URI, experiment name, recall floor,
+threshold search range, split size) lives here. The src/ modules only
+contain the logic.
 
 Run from the project root:
 
     python scripts/run_pipeline.py
     python scripts/run_pipeline.py \\
-        --input data/raw/Telcom-Customer-Churn.csv --threshold 0.3
+        --input data/raw/Telcom-Customer-Churn.csv --min_recall 0.80
 """
 
 import argparse
@@ -56,6 +57,7 @@ def main(args):
         # (the threshold and model hyperparameters are logged by train_model)
         mlflow.log_param("target", args.target)
         mlflow.log_param("test_size", args.test_size)
+        mlflow.log_param("min_recall", args.min_recall)
 
         # === STAGE 1: Load raw data ===
         print("🔄 Loading data...")
@@ -114,8 +116,16 @@ def main(args):
         print(f"✅ Train: {len(X_train)} rows | Test: {len(X_test)} rows")
 
         # === STAGE 6: Hyperparameter tuning (Optuna, train data only) ===
-        print("🎛️  Tuning hyperparameters...")
-        best_params = tune_model(X_train, y_train, threshold=args.threshold)
+        # Maximises churn-class precision while keeping its recall >=
+        # min_recall (higher recall wins at similar precision). Each trial
+        # tunes the hyperparameters, the class weight and the threshold.
+        print("🎛️  Tuning hyperparameters and threshold...")
+        best_params, threshold = tune_model(
+            X_train,
+            y_train,
+            min_recall=args.min_recall,
+            threshold_range=(args.threshold_min, args.threshold_max),
+        )
 
         # === STAGE 7: Train with the tuned hyperparameters ===
         print("🤖 Training model with best params...")
@@ -124,15 +134,13 @@ def main(args):
             y_train,
             X_test,
             y_test,
-            threshold=args.threshold,
+            threshold=threshold,
             params=best_params,
         )
 
         # === STAGE 8: Evaluate on the untouched test set ===
         print("📈 Evaluating model...")
-        metrics = evaluate_model(
-            model, X_test, y_test, threshold=args.threshold
-        )
+        metrics = evaluate_model(model, X_test, y_test, threshold=threshold)
         mlflow.log_metrics({f"test_{k}": v for k, v in metrics.items()})
 
         # === STAGE 9: Save serving artifacts (for the FastAPI app) ===
@@ -173,10 +181,23 @@ if __name__ == "__main__":
     )
     p.add_argument("--target", type=str, default="Churn")
     p.add_argument(
-        "--threshold",
+        "--min_recall",
         type=float,
-        default=0.3,
-        help="decision threshold used for tuning, training and evaluation",
+        default=0.80,
+        help="minimum churn-class recall tuning must keep while maximising "
+        "precision",
+    )
+    p.add_argument(
+        "--threshold_min",
+        type=float,
+        default=0.25,
+        help="lower bound of the decision-threshold search",
+    )
+    p.add_argument(
+        "--threshold_max",
+        type=float,
+        default=0.5,
+        help="upper bound of the decision-threshold search",
     )
     p.add_argument("--test_size", type=float, default=0.2)
     p.add_argument("--experiment", type=str, default="Telco Churn - XGBoost")

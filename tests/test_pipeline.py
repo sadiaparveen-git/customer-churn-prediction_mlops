@@ -105,7 +105,9 @@ def make_args(tmp_path, df: pd.DataFrame = None, **overrides):
     args = {
         "input": str(csv_path),
         "target": "Churn",
-        "threshold": 0.3,
+        "threshold_min": 0.25,
+        "threshold_max": 0.5,
+        "min_recall": 0.0,  # synthetic labels are random; test wiring only
         "test_size": 0.2,
         "experiment": EXPERIMENT,
         "mlflow_uri": f"file://{tmp_path}/mlruns",
@@ -144,8 +146,10 @@ def test_pipeline_end_to_end(pipeline, tmp_path):
     # The MLflow run recorded validation, tuned params and test metrics
     run = latest_run()
     assert run["metrics.data_quality_pass"] == 1.0
-    assert run["params.threshold"] == "0.3"
+    # the tuned threshold must land inside the searched range
+    assert 0.25 <= float(run["params.threshold"]) <= 0.5
     assert "params.n_estimators" in run  # set from the tuned params
+    assert float(run["params.scale_pos_weight"]) >= 1.0  # tuned class weight
     for metric in ("recall", "precision", "f1", "roc_auc"):
         assert 0.0 <= run[f"metrics.test_{metric}"] <= 1.0
 
