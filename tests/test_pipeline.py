@@ -19,67 +19,11 @@ import mlflow
 import numpy as np
 import pandas as pd
 import pytest
+from telco_data import make_telco_df
 from xgboost import XGBClassifier
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 EXPERIMENT = "test-experiment"
-
-
-def make_telco_df(n: int = 400, seed: int = 0) -> pd.DataFrame:
-    """Synthetic data with the same schema/value sets as the raw Telco CSV."""
-    rng = np.random.default_rng(seed)
-
-    def pick(options):
-        return rng.choice(options, size=n)
-
-    internet = pick(["DSL", "Fiber optic", "No"])
-    phone = pick(["Yes", "No"])
-
-    def internet_addon():
-        # Telco encodes "no internet" as its own category on add-on columns
-        return np.where(
-            internet == "No", "No internet service", pick(["Yes", "No"])
-        )
-
-    tenure = rng.integers(1, 73, size=n)
-    monthly = np.round(rng.uniform(20, 110, size=n), 2)
-    total = pd.Series(np.round(monthly * tenure, 2).astype(str))
-    total.iloc[[3, 77]] = " "  # raw file has blank TotalCharges rows
-
-    return pd.DataFrame(
-        {
-            "customerID": [f"ID-{i:04d}" for i in range(n)],
-            "gender": pick(["Male", "Female"]),
-            "SeniorCitizen": rng.integers(0, 2, size=n),
-            "Partner": pick(["Yes", "No"]),
-            "Dependents": pick(["Yes", "No"]),
-            "tenure": tenure,
-            "PhoneService": phone,
-            "MultipleLines": np.where(
-                phone == "Yes", pick(["Yes", "No"]), "No phone service"
-            ),
-            "InternetService": internet,
-            "OnlineSecurity": internet_addon(),
-            "OnlineBackup": internet_addon(),
-            "DeviceProtection": internet_addon(),
-            "TechSupport": internet_addon(),
-            "StreamingTV": internet_addon(),
-            "StreamingMovies": internet_addon(),
-            "Contract": pick(["Month-to-month", "One year", "Two year"]),
-            "PaperlessBilling": pick(["Yes", "No"]),
-            "PaymentMethod": pick(
-                [
-                    "Electronic check",
-                    "Mailed check",
-                    "Bank transfer (automatic)",
-                    "Credit card (automatic)",
-                ]
-            ),
-            "MonthlyCharges": monthly,
-            "TotalCharges": total,
-            "Churn": np.where(rng.random(n) < 0.27, "Yes", "No"),
-        }
-    )
 
 
 @pytest.fixture(scope="module")
@@ -149,7 +93,8 @@ def test_pipeline_end_to_end(pipeline, tmp_path):
 
     # Serving artifacts are saved and consistent with each other
     artifacts = tmp_path / "artifacts"
-    columns = json.loads((artifacts / "feature_columns.json").read_text())
+    schema = json.loads((artifacts / "feature_schema.json").read_text())
+    columns = schema["columns"]
     assert "Churn" not in columns
     model = joblib.load(artifacts / "model.joblib")
     assert list(model.feature_names_in_) == columns
@@ -208,11 +153,11 @@ def test_export_creates_serving_bundle(pipeline, export_module, tmp_path):
     export_module.main(export_args(tmp_path, out))
 
     assert sorted(p.name for p in out.iterdir()) == [
-        "feature_columns.json",
+        "feature_schema.json",
         "model.ubj",
         "model_info.json",
     ]
-    columns = json.loads((out / "feature_columns.json").read_text())
+    columns = json.loads((out / "feature_schema.json").read_text())["columns"]
     info_text = (out / "model_info.json").read_text()
     info = json.loads(info_text)
 

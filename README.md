@@ -34,11 +34,14 @@ flagged list **as accurate as possible (precision)**.
 - **Experiment tracking.** Parameters, metrics, dataset and model are logged
   to MLflow for every run.
 - **Reproducible.** Fixed seeds throughout, so a rerun gives the same result.
-- **Tested.** 11 automated tests cover the pipeline, the tuner and the
-  model export.
+- **Tested.** 27 automated tests cover the pipeline, feature engineering, the
+  tuner, the model export and the prediction code.
+- **Same features in training and serving.** Feature engineering learns its
+  encodings once and saves them, so a single customer is encoded exactly as
+  in training.
 - **Serving-ready model bundle.** One command exports a small `model/` folder
-  (model, exact feature order and decision threshold) that a prediction
-  service can load as is.
+  (model, feature schema and decision threshold), and a ready-made predictor
+  loads it.
 
 ## Results
 
@@ -74,7 +77,7 @@ The pipeline runs these stages in order, inside a single MLflow run:
 | 1. Load | Read the raw CSV | `src/data/load_data.py` |
 | 2. Validate | 23 Great Expectations checks: required columns, allowed values, numeric ranges, consistency | `src/utils/validate_data.py` |
 | 3. Preprocess | Drop the customer ID, fix `TotalCharges` (blank text to number), turn `Churn` into 0/1, fill missing numbers. Saved to `data/processed/` | `src/data/preprocess.py` |
-| 4. Build features | Yes/No and two-value columns become 0/1; other categories are one-hot encoded (30 features) | `src/features/build_features.py` |
+| 4. Build features | Yes/No and two-value columns become 0/1; other categories are one-hot encoded (30 features). The encodings are saved as a schema so serving can repeat them exactly | `src/features/build_features.py` |
 | 5. Split | 80% train / 20% test, stratified so both keep the same churn rate | `scripts/run_pipeline.py` |
 | 6. Tune | Optuna runs 20 trials on the training data only | `src/models/tune.py` |
 | 7. Train | XGBoost is trained with the best settings found | `src/models/train.py` |
@@ -117,18 +120,19 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 │   └── export_model.py        # Exports the trained model as a serving bundle
 ├── src/
 │   ├── data/                  # load_data.py, preprocess.py
-│   ├── features/              # build_features.py
+│   ├── features/              # build_features.py (fit + transform)
 │   ├── models/                # tune.py, train.py, evaluate.py
+│   ├── serving/               # inference.py (scores one customer)
 │   └── utils/                 # validate_data.py (Great Expectations)
-├── model/                     # Serving bundle: model, features, threshold
-├── tests/                     # test_pipeline.py, test_tune.py
+├── model/                     # Serving bundle: model, schema, threshold
+├── tests/                     # Pipeline, features, tuner, inference tests
 ├── notebooks/
 │   └── EDA.ipynb              # Exploration and model comparison
 ├── data/
 │   ├── raw/                   # Put the dataset here (not tracked by git)
 │   ├── processed/             # Cleaned data written by the pipeline
 │   └── external/
-├── artifacts/                 # Saved model + feature list (generated)
+├── artifacts/                 # Saved model + feature schema (generated)
 ├── mlruns/                    # MLflow tracking data (generated)
 ├── app/                       # Planned: FastAPI service
 ├── docker/                    # Planned: container setup
@@ -235,7 +239,7 @@ python scripts/run_pipeline.py --min_recall 0.85
 | ------ | -------- |
 | Cleaned data | `data/processed/telco_churn_processed.csv` |
 | Trained model | `artifacts/model.joblib` |
-| Feature names in the exact order the model expects | `artifacts/feature_columns.json` |
+| Feature schema: encodings and the exact column order | `artifacts/feature_schema.json` |
 | Logged run (settings, metrics, dataset, model) | `mlruns/` |
 
 ## Exporting the model for serving
@@ -253,7 +257,7 @@ This writes a small bundle to `model/` from the latest finished run (use
 | File | Purpose |
 | ---- | ------- |
 | `model.ubj` | The XGBoost model in its native format (no pickle) |
-| `feature_columns.json` | Feature names in the exact order the model expects |
+| `feature_schema.json` | How to build the features: encodings and the exact column order |
 | `model_info.json` | Decision threshold, run ID, test metrics, tuned settings and XGBoost version |
 
 The decision threshold lives in `model_info.json`. A service must apply it to
@@ -262,6 +266,39 @@ hold.
 
 The bundle is about 1.3 MB, so it is committed to the repository. Promoting a
 new model is then three steps: run the pipeline, run the export, commit.
+
+## Making a prediction
+
+`ChurnPredictor` loads the bundle and scores one customer from the raw fields,
+exactly as they appear in the dataset. Run this from the project root:
+
+```python
+from src.serving.inference import ChurnPredictor
+
+predictor = ChurnPredictor()   # loads model/ (or the folder in $MODEL_DIR)
+
+predictor.predict({
+    "gender": "Female", "SeniorCitizen": 0, "Partner": "Yes",
+    "Dependents": "No", "tenure": 1, "PhoneService": "No",
+    "MultipleLines": "No phone service", "InternetService": "DSL",
+    "OnlineSecurity": "No", "OnlineBackup": "Yes", "DeviceProtection": "No",
+    "TechSupport": "No", "StreamingTV": "No", "StreamingMovies": "No",
+    "Contract": "Month-to-month", "PaperlessBilling": "Yes",
+    "PaymentMethod": "Electronic check",
+    "MonthlyCharges": 29.85, "TotalCharges": 29.85,
+})
+# {'churn_score': 0.913, 'likely_to_churn': True,
+#  'label': 'Likely to churn', 'threshold': 0.469}
+```
+
+- The decision is `churn_score >= threshold`. The score is **not** a
+  calibrated probability (the model is trained with a class weight), so show
+  the label, not a percentage.
+- A missing field or a category the model never saw (for example
+  `Contract: "Weekly"`) raises a clear `ValueError` instead of guessing.
+- Scoring all 1,409 held-out customers one at a time through this class gives
+  the same recall (0.837) and precision (0.479) as the training run.
+- This class is what the planned FastAPI service and web UI will call.
 
 ## Using your own data
 
@@ -278,6 +315,8 @@ for the Telco dataset. To adapt it to other data, review these files first:
 - [x] Modular, tested pipeline with data validation
 - [x] Hyperparameter tuning with MLflow experiment tracking
 - [x] Export of a small, committed serving bundle
+- [x] Prediction code shared by training and serving
+      (`src/serving/inference.py`)
 - [ ] FastAPI service that loads the saved model and serves predictions
 - [ ] Docker image for the service
 - [ ] CI with GitHub Actions (tests on every push)

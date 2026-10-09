@@ -6,7 +6,7 @@ The bundle is everything an API needs to make predictions, and nothing else:
 
     model/
     ├── model.ubj              the XGBoost model (native format, no pickle)
-    ├── feature_columns.json   feature names in the exact order the model needs
+    ├── feature_schema.json    how to build the features (encodings + order)
     └── model_info.json        threshold, run id, test metrics, library version
 
 By default the most recent finished run in the experiment is exported. The
@@ -100,19 +100,24 @@ def main(args):
     model = mlflow.xgboost.load_model(f"models:/{model_id}")
     model.save_model(os.path.join(args.output_dir, "model.ubj"))
 
-    # 2) Feature names/order, saved by the pipeline with the run
+    # 2) Feature schema (encodings + column order), saved with the run
+    run_files = [a.path for a in client.list_artifacts(run_id)]
+    if "feature_schema.json" not in run_files:
+        raise ValueError(
+            f"Run {run_id} has no feature_schema.json (it was trained "
+            "before the schema was saved); re-run the pipeline"
+        )
     with tempfile.TemporaryDirectory() as tmp:
-        columns_file = mlflow.artifacts.download_artifacts(
-            run_id=run_id, artifact_path="feature_columns.json", dst_path=tmp
+        schema_file = mlflow.artifacts.download_artifacts(
+            run_id=run_id, artifact_path="feature_schema.json", dst_path=tmp
         )
         shutil.copy(
-            columns_file,
-            os.path.join(args.output_dir, "feature_columns.json"),
+            schema_file, os.path.join(args.output_dir, "feature_schema.json")
         )
 
     # 3) Everything else a service needs to know about this model
-    with open(os.path.join(args.output_dir, "feature_columns.json")) as f:
-        feature_columns = json.load(f)
+    with open(os.path.join(args.output_dir, "feature_schema.json")) as f:
+        feature_columns = json.load(f)["columns"]
 
     params = {k: _number(v) for k, v in run.data.params.items()}
     info = {
@@ -142,7 +147,7 @@ def main(args):
     if check.n_features_in_ != len(feature_columns):
         raise ValueError(
             f"Model expects {check.n_features_in_} features but "
-            f"feature_columns.json lists {len(feature_columns)}"
+            f"feature_schema.json lists {len(feature_columns)}"
         )
 
     print(f"✅ Exported to {args.output_dir}")

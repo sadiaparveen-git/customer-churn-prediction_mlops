@@ -97,8 +97,10 @@ def main(args):
         print(f"✅ Processed data saved to {processed_path} | {df.shape}")
 
         # === STAGE 4: Feature engineering (binary + one-hot encoding) ===
+        # Also returns the feature schema, saved in stage 9 so a prediction
+        # service can build the exact same features for a single customer
         print("🛠️  Building features...")
-        df = build_features(df, target_col=args.target)
+        df, schema = build_features(df, target_col=args.target)
 
         # === STAGE 5: Train/test split ===
         # The only split in the pipeline. The test set stays untouched until
@@ -144,25 +146,25 @@ def main(args):
         mlflow.log_metrics({f"test_{k}": v for k, v in metrics.items()})
 
         # === STAGE 9: Save serving artifacts (for the FastAPI app) ===
-        # Serving must build features in exactly this order, so the column
-        # list is saved next to the model
+        # The feature schema holds the encodings and the exact column order,
+        # so serving builds features identically to training
         print("💾 Saving serving artifacts...")
         artifacts_dir = os.path.join(PROJECT_ROOT, "artifacts")
         os.makedirs(artifacts_dir, exist_ok=True)
 
-        columns_path = os.path.join(artifacts_dir, "feature_columns.json")
-        with open(columns_path, "w") as f:
-            json.dump(list(X.columns), f)
+        schema_path = os.path.join(artifacts_dir, "feature_schema.json")
+        with open(schema_path, "w") as f:
+            json.dump(schema, f, indent=2)
 
         model_path = os.path.join(artifacts_dir, "model.joblib")
         joblib.dump(model, model_path)
 
         # Keep copies with the MLflow run too
-        mlflow.log_artifact(columns_path)
+        mlflow.log_artifact(schema_path)
         mlflow.log_artifact(model_path)
         print(
-            f"✅ Saved {len(X.columns)} feature columns and model "
-            f"to {artifacts_dir}"
+            f"✅ Saved feature schema ({len(schema['columns'])} features) "
+            f"and model to {artifacts_dir}"
         )
 
 

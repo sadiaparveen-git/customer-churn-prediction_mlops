@@ -1,9 +1,9 @@
 {
-  "run_id": "ef18e0c9a9b24e5b9aae55bb4ebcdab1",
-  "run_name": "traveling-boar-672",
-  "model_id": "m-8ef1d924edf9457c9270bef758295fcd",
+  "run_id": "e04cbcc25b1d4bcdb1952d1edaacdc33",
+  "run_name": "bright-hound-997",
+  "model_id": "m-3bf6b2c834e34a76b9884bfbfe310c40",
   "experiment": "Telco Churn - XGBoost",
-  "trained_at": "2026-10-08T09:59:58.746000+00:00",
+  "trained_at": "2026-10-09T16:38:42.824000+00:00",
   "threshold": 0.4693604462813837,
   "n_features": 30,
   "test_metrics": {

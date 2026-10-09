@@ -1,126 +1,191 @@
+"""
+Feature engineering, split into a fit step and a transform step.
+
+- fit_features learns a small "schema" from the training data: which columns
+  are binary, which are multi-category (and their categories), and the exact
+  order of the final feature columns.
+- transform_features applies that schema. It is the single place where raw
+  customer data becomes model input, used for training AND for serving, so
+  the two can never drift apart. It works the same on one row or thousands.
+- build_features is the training entry point: fit + transform in one call.
+
+The schema is plain JSON-serialisable data and is saved with the model.
+"""
+
+from typing import Tuple
+
 import pandas as pd
 
 
-def _map_binary_series(s: pd.Series) -> pd.Series:
+def _binary_mapping(values) -> dict:
     """
-    Apply deterministic binary encoding to 2-category features.
+    Deterministic 0/1 mapping for a column with exactly two categories.
 
-    This function implements the core binary encoding logic that converts
-    categorical features with exactly 2 values into 0/1 integers. The mappings
-    are deterministic and must be consistent between training and serving.
-
+    The mappings are fixed so training and serving always agree.
     """
-    # Get unique values and remove NaN
-    vals = list(pd.Series(s.dropna().unique()).astype(str))
-    valset = set(vals)
-
-    # === DETERMINISTIC BINARY MAPPINGS ===
-    # CRITICAL: These exact mappings are hardcoded in serving pipeline
+    valset = set(values)
 
     # Yes/No mapping (most common pattern in telecom data)
     if valset == {"Yes", "No"}:
-        return s.map({"No": 0, "Yes": 1}).astype("Int64")
+        return {"No": 0, "Yes": 1}
 
     # Gender mapping (demographic feature)
     if valset == {"Male", "Female"}:
-        return s.map({"Female": 0, "Male": 1}).astype("Int64")
+        return {"Female": 0, "Male": 1}
 
-    # === GENERIC BINARY MAPPING ===
-    # For any other 2-category feature, use stable alphabetical ordering
-    if len(vals) == 2:
-        # Sort values to ensure consistent mapping across runs
-        sorted_vals = sorted(vals)
-        mapping = {sorted_vals[0]: 0, sorted_vals[1]: 1}
-        return s.astype(str).map(mapping).astype("Int64")
-
-    # === NON-BINARY FEATURES ===
-    # Return unchanged - will be handled by one-hot encoding
-    return s
+    # Any other 2-category feature: stable alphabetical ordering
+    low, high = sorted(valset)
+    return {low: 0, high: 1}
 
 
-def build_features(
-    df: pd.DataFrame, target_col: str = "Churn"
-) -> pd.DataFrame:
+def fit_features(df: pd.DataFrame, target_col: str = "Churn") -> dict:
     """
-    Apply complete feature engineering pipeline for training data.
+    Learn the feature schema from training data.
 
-    This is the main feature engineering function that transforms raw customer data
-    into ML-ready features. The transformations must be exactly replicated in the
-    serving pipeline to ensure prediction accuracy.
+    Args:
+        df: Preprocessed training data (may include the target column).
+        target_col: Name of the target column, excluded from the features.
 
+    Returns:
+        dict with:
+          passthrough_columns: numeric/boolean columns used as they are
+          binary_mappings: {column: {category: 0/1}} for 2-category columns
+          categorical_levels: {column: sorted categories} for columns with
+              more than 2 categories (the first one is the dropped baseline)
+          columns: the final feature columns, in the order the model expects
     """
-    df = df.copy()
-    print(f"🔧 Starting feature engineering on {df.shape[1]} columns...")
-
-    # === STEP 1: Identify Feature Types ===
-    # Find categorical columns (object dtype) excluding the target variable
-    # include "str" explicitly: pandas >=3 defaults CSV text columns to
+    # === Identify feature types ===
+    # "str" is included explicitly: pandas >=3 defaults CSV text columns to
     # StringDtype, and relying on "object" alone to match them is deprecated
     obj_cols = [
         c
         for c in df.select_dtypes(include=["object", "str"]).columns
         if c != target_col
     ]
-    numeric_cols = df.select_dtypes(
-        include=["int64", "float64"]
-    ).columns.tolist()
+    feature_cols = [c for c in df.columns if c != target_col]
+    passthrough = [c for c in feature_cols if c not in obj_cols]
 
-    print(
-        f"   📊 Found {len(obj_cols)} categorical and {len(numeric_cols)} numeric columns"
+    # === Split categorical columns by number of categories ===
+    # Binary (2 values) -> 0/1 mapping; multi-category (>2) -> one-hot
+    binary_mappings = {}
+    categorical_levels = {}
+    for c in obj_cols:
+        categories = sorted(df[c].dropna().astype(str).unique())
+        if len(categories) < 2:
+            raise ValueError(
+                f"Column '{c}' has {len(categories)} categories; "
+                "need at least 2 to encode it"
+            )
+        if len(categories) == 2:
+            binary_mappings[c] = _binary_mapping(categories)
+        else:
+            categorical_levels[c] = categories
+
+    # === Final column order ===
+    # Same layout pandas get_dummies(drop_first=True) produces: original
+    # columns (multi-category ones removed) first, then the dummy columns.
+    # drop_first prevents multicollinearity; the first category is the
+    # baseline.
+    dummies = [
+        f"{c}_{level}"
+        for c, levels in categorical_levels.items()
+        for level in levels[1:]
+    ]
+    kept = [c for c in feature_cols if c not in categorical_levels]
+    columns = kept + dummies
+
+    return {
+        "passthrough_columns": passthrough,
+        "binary_mappings": binary_mappings,
+        "categorical_levels": categorical_levels,
+        "columns": columns,
+    }
+
+
+def transform_features(df: pd.DataFrame, schema: dict) -> pd.DataFrame:
+    """
+    Turn preprocessed customer data into model-ready features.
+
+    Works identically for a whole training set and for a single customer.
+    Raises a clear error for missing columns or categories not seen in
+    training, instead of silently producing wrong features.
+
+    Args:
+        df: Preprocessed data (one row or many).
+        schema: The dict returned by fit_features.
+
+    Returns:
+        DataFrame with exactly schema["columns"], in that order, all numeric.
+    """
+    required = (
+        schema["passthrough_columns"]
+        + list(schema["binary_mappings"])
+        + list(schema["categorical_levels"])
     )
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
 
-    # === STEP 2: Split Categorical by Cardinality ===
-    # Binary features (exactly 2 unique values) get binary encoding
-    # Multi-category features (>2 unique values) get one-hot encoding
-    binary_cols = [c for c in obj_cols if df[c].dropna().nunique() == 2]
-    multi_cols = [c for c in obj_cols if df[c].dropna().nunique() > 2]
+    out = {}
 
+    # Numeric/boolean columns pass through (booleans become 0/1)
+    for c in schema["passthrough_columns"]:
+        series = df[c]
+        is_bool = pd.api.types.is_bool_dtype(series)
+        out[c] = series.astype(int) if is_bool else series
+
+    # Binary columns: fixed category -> 0/1 mapping
+    for c, mapping in schema["binary_mappings"].items():
+        mapped = df[c].astype(str).map(mapping)
+        bad = mapped.isna()
+        if bad.any():
+            raise ValueError(
+                f"Column '{c}' must be one of {sorted(mapping)}, got "
+                f"{sorted(set(df.loc[bad, c].astype(str)))}"
+            )
+        out[c] = mapped.astype(int)
+
+    # Multi-category columns: one-hot with the training categories, so a
+    # single row still produces the full set of columns. The baseline
+    # category (first level) is all zeros; a missing value is also all zeros.
+    for c, levels in schema["categorical_levels"].items():
+        values = df[c].astype(str)
+        unseen = set(df[c].dropna().astype(str)) - set(levels)
+        if unseen:
+            raise ValueError(
+                f"Column '{c}' must be one of {levels}, got {sorted(unseen)}"
+            )
+        for level in levels[1:]:
+            out[f"{c}_{level}"] = (values == level).astype(int)
+
+    return pd.DataFrame(out, index=df.index)[schema["columns"]]
+
+
+def build_features(
+    df: pd.DataFrame, target_col: str = "Churn"
+) -> Tuple[pd.DataFrame, dict]:
+    """
+    Training entry point: learn the schema from df and apply it.
+
+    The schema must be saved with the model and used by transform_features at
+    serving time, so training and serving use identical transformations.
+
+    Returns:
+        (features DataFrame with the target column appended, schema dict)
+    """
+    print(f"🔧 Starting feature engineering on {df.shape[1]} columns...")
+
+    schema = fit_features(df, target_col)
     print(
-        f"   🔢 Binary features: {len(binary_cols)} | Multi-category features: {len(multi_cols)}"
+        f"   🔢 Binary features: {len(schema['binary_mappings'])} | "
+        f"Multi-category features: {len(schema['categorical_levels'])}"
     )
-    if binary_cols:
-        print(f"      Binary: {binary_cols}")
-    if multi_cols:
-        print(f"      Multi-category: {multi_cols}")
+    print(f"      Binary: {list(schema['binary_mappings'])}")
+    print(f"      Multi-category: {list(schema['categorical_levels'])}")
 
-    # === STEP 3: Apply Binary Encoding ===
-    # Convert 2-category features to 0/1 using deterministic mappings
-    for c in binary_cols:
-        original_dtype = df[c].dtype
-        df[c] = _map_binary_series(df[c].astype(str))
-        print(f"      ✅ {c}: {original_dtype} → binary (0/1)")
+    features = transform_features(df, schema)
+    if target_col in df.columns:
+        features[target_col] = df[target_col]
 
-    # === STEP 4: Convert Boolean Columns ===
-    # XGBoost requires integer inputs, not boolean
-    bool_cols = df.select_dtypes(include=["bool"]).columns.tolist()
-    if bool_cols:
-        df[bool_cols] = df[bool_cols].astype(int)
-        print(
-            f"   🔄 Converted {len(bool_cols)} boolean columns to int: {bool_cols}"
-        )
-
-    # === STEP 5: One-Hot Encoding for Multi-Category Features ===
-    # CRITICAL: drop_first=True prevents multicollinearity
-    if multi_cols:
-        print(
-            f"   🌟 Applying one-hot encoding to {len(multi_cols)} multi-category columns..."
-        )
-        original_shape = df.shape
-
-        # Apply one-hot encoding with drop_first=True (same as serving)
-        df = pd.get_dummies(df, columns=multi_cols, drop_first=True)
-
-        new_features = df.shape[1] - original_shape[1] + len(multi_cols)
-        print(
-            f"      ✅ Created {new_features} new features from {len(multi_cols)} categorical columns"
-        )
-
-    # === STEP 6: Data Type Cleanup ===
-    # Convert nullable integers (Int64) to standard integers for XGBoost
-    for c in binary_cols:
-        if pd.api.types.is_integer_dtype(df[c]):
-            # Fill any NaN values with 0 and convert to int
-            df[c] = df[c].fillna(0).astype(int)
-
-    print(f"✅ Feature engineering complete: {df.shape[1]} final features")
-    return df
+    print(f"✅ Feature engineering complete: {len(schema['columns'])} features")
+    return features, schema
