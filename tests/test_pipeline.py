@@ -1,5 +1,5 @@
 """
-Tests for scripts/run_pipeline.py.
+Tests for scripts/run_pipeline.py and scripts/export_model.py.
 
 The raw dataset is gitignored, so these tests build a small synthetic
 Telco-style CSV and run the real pipeline against it. All outputs
@@ -19,6 +19,7 @@ import mlflow
 import numpy as np
 import pandas as pd
 import pytest
+from xgboost import XGBClassifier
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 EXPERIMENT = "test-experiment"
@@ -86,6 +87,16 @@ def pipeline_module():
     """Import scripts/run_pipeline.py (it isn't a package) once per module."""
     path = os.path.join(PROJECT_ROOT, "scripts", "run_pipeline.py")
     spec = importlib.util.spec_from_file_location("run_pipeline", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def export_module():
+    """Import scripts/export_model.py once per module."""
+    path = os.path.join(PROJECT_ROOT, "scripts", "export_model.py")
+    spec = importlib.util.spec_from_file_location("export_model", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -177,3 +188,53 @@ def test_pipeline_rejects_missing_input_file(pipeline, tmp_path):
     args = make_args(tmp_path, input=str(tmp_path / "nope.csv"))
     with pytest.raises(FileNotFoundError):
         pipeline.main(args)
+
+
+def export_args(tmp_path, out_dir, **overrides):
+    args = {
+        "experiment": EXPERIMENT,
+        "run_id": None,
+        "output_dir": str(out_dir),
+        "mlflow_uri": f"file://{tmp_path}/mlruns",
+    }
+    args.update(overrides)
+    return argparse.Namespace(**args)
+
+
+def test_export_creates_serving_bundle(pipeline, export_module, tmp_path):
+    """Pipeline -> export gives a small bundle that matches the run."""
+    pipeline.main(make_args(tmp_path))
+    out = tmp_path / "bundle"
+    export_module.main(export_args(tmp_path, out))
+
+    assert sorted(p.name for p in out.iterdir()) == [
+        "feature_columns.json",
+        "model.ubj",
+        "model_info.json",
+    ]
+    columns = json.loads((out / "feature_columns.json").read_text())
+    info_text = (out / "model_info.json").read_text()
+    info = json.loads(info_text)
+
+    # model_info describes the run that was exported
+    assert info["run_id"] == latest_run()["run_id"]
+    assert 0.25 <= info["threshold"] <= 0.5
+    assert info["n_features"] == len(columns)
+    assert str(tmp_path) not in info_text  # no local paths leak out
+
+    # The exported model predicts exactly like the one the pipeline saved
+    exported = XGBClassifier()
+    exported.load_model(str(out / "model.ubj"))
+    original = joblib.load(tmp_path / "artifacts" / "model.joblib")
+    X = pd.DataFrame(
+        np.random.default_rng(0).random((50, len(columns))), columns=columns
+    )
+    assert np.allclose(
+        exported.predict_proba(X)[:, 1], original.predict_proba(X)[:, 1]
+    )
+
+
+def test_export_rejects_unknown_experiment(export_module, tmp_path):
+    args = export_args(tmp_path, tmp_path / "bundle", experiment="nope")
+    with pytest.raises(ValueError, match="not found"):
+        export_module.main(args)

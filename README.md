@@ -34,9 +34,11 @@ flagged list **as accurate as possible (precision)**.
 - **Experiment tracking.** Parameters, metrics, dataset and model are logged
   to MLflow for every run.
 - **Reproducible.** Fixed seeds throughout, so a rerun gives the same result.
-- **Tested.** 9 automated tests cover the pipeline and the tuner.
-- **Serving-ready outputs.** The trained model is saved together with the
-  exact feature order the future API will need.
+- **Tested.** 11 automated tests cover the pipeline, the tuner and the
+  model export.
+- **Serving-ready model bundle.** One command exports a small `model/` folder
+  (model, exact feature order and decision threshold) that a prediction
+  service can load as is.
 
 ## Results
 
@@ -111,12 +113,14 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 ```
 .
 ├── scripts/
-│   └── run_pipeline.py        # Runs the whole workflow (start here)
+│   ├── run_pipeline.py        # Runs the whole workflow (start here)
+│   └── export_model.py        # Exports the trained model as a serving bundle
 ├── src/
 │   ├── data/                  # load_data.py, preprocess.py
 │   ├── features/              # build_features.py
 │   ├── models/                # tune.py, train.py, evaluate.py
 │   └── utils/                 # validate_data.py (Great Expectations)
+├── model/                     # Serving bundle: model, features, threshold
 ├── tests/                     # test_pipeline.py, test_tune.py
 ├── notebooks/
 │   └── EDA.ipynb              # Exploration and model comparison
@@ -135,7 +139,8 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 
 Folders marked "generated" are created when you run the pipeline. Data,
 artifacts and MLflow runs are listed in `.gitignore`, so they are not
-committed.
+committed. The small `model/` bundle is the exception: it is committed so the
+service can be built and deployed without retraining.
 
 ## Getting started
 
@@ -201,7 +206,7 @@ pytest tests -v
 
 The tests build a small synthetic dataset, so they do not need the real CSV
 and they do not touch your own `artifacts/`, `data/processed/` or `mlruns/`.
-They take about a minute.
+They take about a minute and a half.
 
 ## Configuration
 
@@ -233,6 +238,31 @@ python scripts/run_pipeline.py --min_recall 0.85
 | Feature names in the exact order the model expects | `artifacts/feature_columns.json` |
 | Logged run (settings, metrics, dataset, model) | `mlruns/` |
 
+## Exporting the model for serving
+
+`mlruns/` holds every run and is meant for tracking, not for deployment.
+To hand one model to a prediction service, export it:
+
+```bash
+python scripts/export_model.py
+```
+
+This writes a small bundle to `model/` from the latest finished run (use
+`--run_id` to pick another):
+
+| File | Purpose |
+| ---- | ------- |
+| `model.ubj` | The XGBoost model in its native format (no pickle) |
+| `feature_columns.json` | Feature names in the exact order the model expects |
+| `model_info.json` | Decision threshold, run ID, test metrics, tuned settings and XGBoost version |
+
+The decision threshold lives in `model_info.json`. A service must apply it to
+the model's probability, otherwise the recall and precision above will not
+hold.
+
+The bundle is about 1.3 MB, so it is committed to the repository. Promoting a
+new model is then three steps: run the pipeline, run the export, commit.
+
 ## Using your own data
 
 The pipeline structure is generic, but the checks and cleaning are written
@@ -247,6 +277,7 @@ for the Telco dataset. To adapt it to other data, review these files first:
 - [x] Exploratory analysis and model comparison
 - [x] Modular, tested pipeline with data validation
 - [x] Hyperparameter tuning with MLflow experiment tracking
+- [x] Export of a small, committed serving bundle
 - [ ] FastAPI service that loads the saved model and serves predictions
 - [ ] Docker image for the service
 - [ ] CI with GitHub Actions (tests on every push)
