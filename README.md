@@ -34,8 +34,8 @@ flagged list **as accurate as possible (precision)**.
 - **Experiment tracking.** Parameters, metrics, dataset and model are logged
   to MLflow for every run.
 - **Reproducible.** Fixed seeds throughout, so a rerun gives the same result.
-- **Tested.** 27 automated tests cover the pipeline, feature engineering, the
-  tuner, the model export and the prediction code.
+- **Tested.** 50 automated tests cover the pipeline, feature engineering, the
+  tuner, the model export, the prediction code and the API.
 - **Same features in training and serving.** Feature engineering learns its
   encodings once and saves them, so a single customer is encoded exactly as
   in training.
@@ -134,7 +134,7 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 │   └── external/
 ├── artifacts/                 # Saved model + feature schema (generated)
 ├── mlruns/                    # MLflow tracking data (generated)
-├── app/                       # Planned: FastAPI service
+├── app/                       # FastAPI service (main.py); UI to come (app.py)
 ├── docker/                    # Planned: container setup
 ├── configs/                   # Reserved for configuration files
 ├── .github/workflows/         # Planned: CI
@@ -298,7 +298,8 @@ predictor.predict({
   `Contract: "Weekly"`) raises a clear `ValueError` instead of guessing.
 - Scoring all 1,409 held-out customers one at a time through this class gives
   the same recall (0.837) and precision (0.479) as the training run.
-- This class is what the planned FastAPI service and web UI will call.
+- This class is what the FastAPI service in `app/` calls, and the planned
+  web UI will use it through that API.
 
 ## Using your own data
 
@@ -317,7 +318,7 @@ for the Telco dataset. To adapt it to other data, review these files first:
 - [x] Export of a small, committed serving bundle
 - [x] Prediction code shared by training and serving
       (`src/serving/inference.py`)
-- [ ] FastAPI service that loads the saved model and serves predictions
+- [x] FastAPI service that loads the saved model and serves predictions
 - [ ] Docker image for the service
 - [ ] CI with GitHub Actions (tests on every push)
 

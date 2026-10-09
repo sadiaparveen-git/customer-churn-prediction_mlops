@@ -9,6 +9,7 @@ python-dotenv
 joblib
 great-expectations
 pytest
+httpx2
 lightgbm
 xgboost
 matplotlib
