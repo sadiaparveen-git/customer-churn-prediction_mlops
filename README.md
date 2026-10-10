@@ -135,7 +135,7 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 ├── artifacts/                 # Saved model + feature schema (generated)
 ├── mlruns/                    # MLflow tracking data (generated)
 ├── app/                       # FastAPI service (main.py); UI to come (app.py)
-├── docker/                    # Planned: container setup
+├── docker/                    # Dockerfile for the prediction API
 ├── configs/                   # Reserved for configuration files
 ├── .github/workflows/         # Planned: CI
 └── requirements.txt
@@ -319,7 +319,7 @@ for the Telco dataset. To adapt it to other data, review these files first:
 - [x] Prediction code shared by training and serving
       (`src/serving/inference.py`)
 - [x] FastAPI service that loads the saved model and serves predictions
-- [ ] Docker image for the service
+- [x] Docker image for the service
 - [ ] CI with GitHub Actions (tests on every push)
 
 ## Troubleshooting

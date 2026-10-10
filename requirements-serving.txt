@@ -1,0 +1,18 @@
+# Runtime dependencies for the prediction API (used by docker/Dockerfile).
+# Pinned to the exact versions the model was trained and tested with, so the
+# container behaves like the local environment. Training and development
+# tools (MLflow, Optuna, Great Expectations, pytest, ...) stay in
+# requirements.txt and are not installed in the image.
+fastapi==0.141.1
+uvicorn==0.53.0
+pydantic==2.13.5
+# XGBoost 3.2.0 in both cases. The default wheel bundles GPU libraries (~700 MB
+# in the image) that CPU serving never uses. x86_64 (the usual AWS target) gets
+# the CPU-only build; it has no ARM Linux wheel for 3.2.0, so ARM (e.g. Docker
+# on an Apple Silicon Mac) gets the default one, and the Dockerfile removes its
+# unused GPU package.
+xgboost-cpu==3.2.0; platform_machine == "x86_64"
+xgboost==3.2.0; platform_machine != "x86_64"
+scikit-learn==1.9.1
+numpy==2.4.6
+pandas==3.0.6

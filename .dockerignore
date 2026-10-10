@@ -1,0 +1,36 @@
+# Docker does not read .gitignore, so list here everything the image must not
+# contain. The build copies only app/, src/ and model/ plus the serving
+# requirements; everything else stays out of the build context.
+
+# Version control and CI
+.git/
+.github/
+
+# Local environments and caches (the .venv alone is ~800 MB)
+.venv/
+venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Training-time data and outputs
+data/
+artifacts/
+mlruns/
+mlartifacts/
+notebooks/
+*.ipynb
+
+# Not needed at runtime
+tests/
+scripts/
+docker/
+README.md
+requirements.txt
+
+# Secrets and OS files
+.env
+.env.*
+.DS_Store
