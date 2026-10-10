@@ -1,10 +1,22 @@
 # Customer Churn Prediction (MLOps)
 
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![pandas](https://img.shields.io/badge/pandas-150458?style=for-the-badge&logo=pandas&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-017CEE?style=for-the-badge&logo=xgboost&logoColor=white)
+![Optuna](https://img.shields.io/badge/Optuna-2C5BB4?style=for-the-badge)
+![MLflow](https://img.shields.io/badge/MLflow-0194E2?style=for-the-badge&logo=mlflow&logoColor=white)
+![Great Expectations](https://img.shields.io/badge/Great%20Expectations-FF6310?style=for-the-badge)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=for-the-badge&logo=pydantic&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)
+
 An end-to-end machine learning project that predicts which telecom customers
 are likely to leave ("churn"). It covers the full workflow: data validation,
 feature engineering, hyperparameter tuning, training and evaluation, with
-every run tracked in MLflow. A FastAPI prediction service is the next
-milestone (see [Roadmap](#roadmap)).
+every run tracked in MLflow. The trained model is served through a FastAPI
+service that runs in a Docker container.
 
 ## Why this project
 
@@ -42,6 +54,11 @@ flagged list **as accurate as possible (precision)**.
 - **Serving-ready model bundle.** One command exports a small `model/` folder
   (model, feature schema and decision threshold), and a ready-made predictor
   loads it.
+- **Validated REST API.** FastAPI and Pydantic reject bad input (wrong
+  category, out-of-range number, missing field) with a clear error before the
+  model ever sees it.
+- **Containerised.** A slim, non-root Docker image with a health check serves
+  the model; its predictions match the local ones.
 
 ## Results
 
@@ -125,7 +142,7 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 │   ├── serving/               # inference.py (scores one customer)
 │   └── utils/                 # validate_data.py (Great Expectations)
 ├── model/                     # Serving bundle: model, schema, threshold
-├── tests/                     # Pipeline, features, tuner, inference tests
+├── tests/                     # Pipeline, features, tuner, inference, API tests
 ├── notebooks/
 │   └── EDA.ipynb              # Exploration and model comparison
 ├── data/
@@ -138,7 +155,8 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 ├── docker/                    # Dockerfile for the prediction API
 ├── configs/                   # Reserved for configuration files
 ├── .github/workflows/         # Planned: CI
-└── requirements.txt
+├── requirements.txt           # Training and development dependencies
+└── requirements-serving.txt   # Pinned dependencies for the Docker image
 ```
 
 Folders marked "generated" are created when you run the pipeline. Data,
@@ -301,6 +319,39 @@ predictor.predict({
 - This class is what the FastAPI service in `app/` calls, and the planned
   web UI will use it through that API.
 
+## Running the API
+
+The service wraps the predictor behind three endpoints:
+
+| Endpoint | Purpose |
+| -------- | ------- |
+| `GET /health` | Is the service up? |
+| `GET /model-info` | Which model is served: run ID, threshold, test metrics |
+| `POST /predict` | Score one customer (JSON in the same fields as above) |
+
+Start it from the project root:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Then open http://127.0.0.1:8000/docs for interactive documentation where you
+can try every endpoint in the browser. A request with an invalid value, such
+as `"Contract": "Weekly"`, is rejected with a `422` error that names the field.
+
+### With Docker
+
+The image needs only the `model/` bundle, not the training tools:
+
+```bash
+docker build -f docker/Dockerfile -t churn-api .
+docker run --rm -p 8000:8000 churn-api
+```
+
+The API is then available at http://127.0.0.1:8000, same as above. The image
+is about 500 MB on x86_64 (the usual cloud target) and about 760 MB on ARM
+(for example Docker on an Apple Silicon Mac).
+
 ## Using your own data
 
 The pipeline structure is generic, but the checks and cleaning are written
@@ -338,10 +389,10 @@ for the Telco dataset. To adapt it to other data, review these files first:
 
 Released under the [MIT License](LICENSE).
 
-## Tech stack
+## Versions
 
-Python 3.11, pandas, scikit-learn, XGBoost, Optuna, MLflow, Great Expectations,
-pytest. Developed and tested with pandas 3.0, scikit-learn 1.9, XGBoost 3.2,
-MLflow 3.16, Great Expectations 1.23 and Optuna 5.0. The requirements file does
-not pin versions, so if a future release breaks something, install these
-versions.
+Developed and tested with Python 3.11, pandas 3.0, scikit-learn 1.9,
+XGBoost 3.2, MLflow 3.16, Great Expectations 1.23, Optuna 5.0, FastAPI 0.141
+and Pydantic 2.13. `requirements.txt` does not pin versions, so if a future
+release breaks something, install these. The Docker image uses
+`requirements-serving.txt`, which is pinned.
