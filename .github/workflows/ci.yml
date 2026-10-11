@@ -20,13 +20,13 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Same Python minor version the model was trained with
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -34,16 +34,45 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # -ra lists every skipped/failed test at the end of the log; the XML
+      # report feeds the summary shown on the run page
       - name: Run tests
-        run: pytest tests -v
+        run: pytest tests -v -ra --junitxml=pytest-report.xml
+
+      # Show the test counts and slowest tests on the run's summary page
+      - name: Publish test summary
+        if: always()
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import os, xml.etree.ElementTree as ET
+          if not os.path.exists("pytest-report.xml"):
+              raise SystemExit("## Tests\n\nNo test report was produced.")
+          suite = ET.parse("pytest-report.xml").getroot()
+          suite = suite if suite.tag == "testsuite" else suite[0]
+          total = int(suite.get("tests"))
+          failed = int(suite.get("failures")) + int(suite.get("errors"))
+          skipped = int(suite.get("skipped"))
+          cases = list(suite.iter("testcase"))
+          print("## Test results\n")
+          print("| Total | Passed | Failed | Skipped | Duration |")
+          print("| ----- | ------ | ------ | ------- | -------- |")
+          print(f"| {total} | {total - failed - skipped} | {failed} | "
+                f"{skipped} | {float(suite.get('time')):.0f}s |\n")
+          print("### Slowest tests\n")
+          print("| Test | Seconds |")
+          print("| ---- | ------- |")
+          for c in sorted(cases, key=lambda c: -float(c.get("time")))[:5]:
+              print(f"| `{c.get('classname')}::{c.get('name')}` | "
+                    f"{float(c.get('time')):.1f} |")
+          EOF
 
   docker:
     # Only build the image once the tests pass
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build the image
         run: docker build -f docker/Dockerfile -t churn-api .

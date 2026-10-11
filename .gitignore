@@ -59,3 +59,6 @@ logs/
 # IDE
 .vscode/
 .idea/
+
+# Test reports
+pytest-report.xml
