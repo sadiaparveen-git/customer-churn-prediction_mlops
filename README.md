@@ -154,8 +154,8 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 ├── app/                       # FastAPI service (main.py); UI to come (app.py)
 ├── docker/                    # Dockerfile for the prediction API
 ├── configs/                   # Reserved for configuration files
-├── .github/workflows/         # Planned: CI
-├── requirements.txt           # Training and development dependencies
+├── .github/workflows/         # CI: tests + Docker build (ci.yml)
+├── requirements.txt           # Pinned training/development dependencies
 └── requirements-serving.txt   # Pinned dependencies for the Docker image
 ```
 
@@ -371,7 +371,7 @@ for the Telco dataset. To adapt it to other data, review these files first:
       (`src/serving/inference.py`)
 - [x] FastAPI service that loads the saved model and serves predictions
 - [x] Docker image for the service
-- [ ] CI with GitHub Actions (tests on every push)
+- [x] CI with GitHub Actions (tests and Docker build on every push)
 
 ## Troubleshooting
 
@@ -391,8 +391,8 @@ Released under the [MIT License](LICENSE).
 
 ## Versions
 
-Developed and tested with Python 3.11, pandas 3.0, scikit-learn 1.9,
-XGBoost 3.2, MLflow 3.16, Great Expectations 1.23, Optuna 5.0, FastAPI 0.141
-and Pydantic 2.13. `requirements.txt` does not pin versions, so if a future
-release breaks something, install these. The Docker image uses
-`requirements-serving.txt`, which is pinned.
+Direct dependencies are pinned in `requirements.txt` to the versions the
+project was developed and tested with (Python 3.11, pandas 3.0,
+scikit-learn 1.9, XGBoost 3.2, MLflow 3.16, Great Expectations 1.23,
+Optuna 5.0, FastAPI 0.141, Pydantic 2.13). The Docker image uses
+`requirements-serving.txt`, which is pinned separately and kept small.

@@ -1,0 +1,69 @@
+# Continuous integration: runs on every push and pull request to main.
+#   1. test   - the full pytest suite (uses synthetic data, no raw CSV needed)
+#   2. docker - builds the serving image and checks the running container
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch cancels the run that is still going
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same Python minor version the model was trained with
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests -v
+
+  docker:
+    # Only build the image once the tests pass
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -f docker/Dockerfile -t churn-api .
+
+      - name: Start the container
+        run: docker run -d --name churn-api -p 8000:8000 churn-api
+
+      # Wait until the API answers, then score one customer end to end
+      - name: Smoke test the running container
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/health; then break; fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health
+          curl -sf http://127.0.0.1:8000/model-info
+          curl -sf -X POST http://127.0.0.1:8000/predict \
+            -H "Content-Type: application/json" \
+            -d '{"gender":"Female","SeniorCitizen":0,"Partner":"Yes","Dependents":"No","tenure":1,"PhoneService":"No","MultipleLines":"No phone service","InternetService":"DSL","OnlineSecurity":"No","OnlineBackup":"Yes","DeviceProtection":"No","TechSupport":"No","StreamingTV":"No","StreamingMovies":"No","Contract":"Month-to-month","PaperlessBilling":"Yes","PaymentMethod":"Electronic check","MonthlyCharges":29.85,"TotalCharges":29.85}'
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs churn-api
