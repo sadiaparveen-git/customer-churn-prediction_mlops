@@ -25,6 +25,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import RedirectResponse
 
 from app.schemas import (
     CustomerData,
@@ -60,6 +61,12 @@ def get_predictor(request: Request) -> ChurnPredictor:
 
 
 Predictor = Annotated[ChurnPredictor, Depends(get_predictor)]
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """The API has no page of its own; send visitors to the documentation."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health", response_model=HealthResponse)
