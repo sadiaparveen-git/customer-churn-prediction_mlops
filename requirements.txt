@@ -19,3 +19,5 @@ seaborn==0.13.2
 statsmodels==0.15.0
 optuna==5.0.0
 ipykernel==7.3.0
+gradio==6.30.0
+requests==2.34.2

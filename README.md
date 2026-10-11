@@ -46,8 +46,8 @@ flagged list **as accurate as possible (precision)**.
 - **Experiment tracking.** Parameters, metrics, dataset and model are logged
   to MLflow for every run.
 - **Reproducible.** Fixed seeds throughout, so a rerun gives the same result.
-- **Tested.** 50 automated tests cover the pipeline, feature engineering, the
-  tuner, the model export, the prediction code and the API.
+- **Tested.** 71 automated tests cover the pipeline, feature engineering, the
+  tuner, the model export, the prediction code, the API and the UI.
 - **Same features in training and serving.** Feature engineering learns its
   encodings once and saves them, so a single customer is encoded exactly as
   in training.
@@ -151,7 +151,7 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 │   └── external/
 ├── artifacts/                 # Saved model + feature schema (generated)
 ├── mlruns/                    # MLflow tracking data (generated)
-├── app/                       # FastAPI service (main.py); UI to come (app.py)
+├── app/                       # FastAPI service (main.py) and Gradio UI (app.py)
 ├── docker/                    # Dockerfile for the prediction API
 ├── configs/                   # Reserved for configuration files
 ├── .github/workflows/         # CI: tests + Docker build (ci.yml)
@@ -316,8 +316,8 @@ predictor.predict({
   `Contract: "Weekly"`) raises a clear `ValueError` instead of guessing.
 - Scoring all 1,409 held-out customers one at a time through this class gives
   the same recall (0.837) and precision (0.479) as the training run.
-- This class is what the FastAPI service in `app/` calls, and the planned
-  web UI will use it through that API.
+- This class is what the FastAPI service in `app/` calls, and the web UI
+  uses it through that API.
 
 ## Running the API
 
@@ -338,6 +338,23 @@ uvicorn app.main:app --reload
 Then open http://127.0.0.1:8000/docs for interactive documentation where you
 can try every endpoint in the browser. A request with an invalid value, such
 as `"Contract": "Weekly"`, is rejected with a `422` error that names the field.
+
+### Web UI
+
+A Gradio page lets anyone try the model without writing JSON. It calls the API
+over HTTP instead of loading the model, so the decision threshold and the
+validation rules live in one place. With the API running, start the UI in a
+second terminal:
+
+```bash
+python -m app.app
+```
+
+Then open http://127.0.0.1:7860. The form cannot create contradictory input:
+choosing "No" for phone service fixes "Multiple lines", and choosing "No" for
+internet service fixes every add-on. To point the UI at an API on another
+address, set `API_URL`, for example
+`API_URL=http://localhost:8000 python -m app.app`.
 
 ### With Docker
 
@@ -372,6 +389,8 @@ for the Telco dataset. To adapt it to other data, review these files first:
 - [x] FastAPI service that loads the saved model and serves predictions
 - [x] Docker image for the service
 - [x] CI with GitHub Actions (tests and Docker build on every push)
+- [x] Gradio web UI that calls the API
+- [ ] Deploy the API and UI to AWS
 
 ## Troubleshooting
 
