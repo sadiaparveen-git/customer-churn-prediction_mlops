@@ -46,7 +46,7 @@ flagged list **as accurate as possible (precision)**.
 - **Experiment tracking.** Parameters, metrics, dataset and model are logged
   to MLflow for every run.
 - **Reproducible.** Fixed seeds throughout, so a rerun gives the same result.
-- **Tested.** 71 automated tests cover the pipeline, feature engineering, the
+- **Tested.** 101 automated tests cover the pipeline, feature engineering, the
   tuner, the model export, the prediction code, the API and the UI.
 - **Same features in training and serving.** Feature engineering learns its
   encodings once and saves them, so a single customer is encoded exactly as
@@ -134,14 +134,15 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 .
 ├── scripts/
 │   ├── run_pipeline.py        # Runs the whole workflow (start here)
-│   └── export_model.py        # Exports the trained model as a serving bundle
+│   ├── export_model.py        # Exports the trained model as a serving bundle
+│   └── build_score_reference.py  # Adds risk bands and percentiles to the bundle
 ├── src/
 │   ├── data/                  # load_data.py, preprocess.py
 │   ├── features/              # build_features.py (fit + transform)
 │   ├── models/                # tune.py, train.py, evaluate.py
-│   ├── serving/               # inference.py (scores one customer)
+│   ├── serving/               # inference.py, score_reference.py
 │   └── utils/                 # validate_data.py (Great Expectations)
-├── model/                     # Serving bundle: model, schema, threshold
+├── model/                     # Serving bundle: model, schema, threshold, score context
 ├── tests/                     # Pipeline, features, tuner, inference, API tests
 ├── notebooks/
 │   └── EDA.ipynb              # Exploration and model comparison
@@ -277,13 +278,42 @@ This writes a small bundle to `model/` from the latest finished run (use
 | `model.ubj` | The XGBoost model in its native format (no pickle) |
 | `feature_schema.json` | How to build the features: encodings and the exact column order |
 | `model_info.json` | Decision threshold, run ID, test metrics, tuned settings and XGBoost version |
+| `score_reference.json` | Context for a score: how it ranks and what happened to similar customers (see below) |
 
 The decision threshold lives in `model_info.json`. A service must apply it to
 the model's probability, otherwise the recall and precision above will not
 hold.
 
 The bundle is about 1.3 MB, so it is committed to the repository. Promoting a
-new model is then three steps: run the pipeline, run the export, commit.
+new model is then four steps: run the pipeline, run the export, build the
+score reference, commit.
+
+### Making the score meaningful
+
+A raw score such as 0.12 means little to a business user, and it is not a
+probability. So the export is followed by:
+
+```bash
+python scripts/build_score_reference.py
+```
+
+It rebuilds the held-out test set (same data, same seeded split as the
+pipeline), scores it with the exported model and checks that recall and
+precision match the training run. It then saves `score_reference.json`, which
+lets the API answer in plain terms:
+
+| Risk level | Model score | Test customers | Actually churned |
+| ---------- | ----------- | -------------- | ---------------- |
+| Low        | below 0.20  | 530            | 4%               |
+| Moderate   | 0.20 to 0.47 | 225           | 17%              |
+| High       | 0.47 to 0.85 | 412           | 36%              |
+| Very high  | 0.85 and up | 242            | 68%              |
+
+(For comparison, 27% of all test customers churned.) "High" starts at the
+decision threshold, so the risk level always agrees with the Likely / Not
+likely decision. The response also says how the customer ranks, for example
+"riskier than 90% of customers". This needs no retraining and no change to the
+pipeline. The script refuses to run if the data does not match the model.
 
 ## Making a prediction
 
@@ -306,12 +336,14 @@ predictor.predict({
     "MonthlyCharges": 29.85, "TotalCharges": 29.85,
 })
 # {'churn_score': 0.913, 'likely_to_churn': True,
-#  'label': 'Likely to churn', 'threshold': 0.469}
+#  'label': 'Likely to churn', 'threshold': 0.469,
+#  'risk_percentile': 90, 'risk_band': 'Very high',
+#  'observed_churn_rate': 0.6777}
 ```
 
 - The decision is `churn_score >= threshold`. The score is **not** a
   calibrated probability (the model is trained with a class weight), so show
-  the label, not a percentage.
+  the label, the risk level and the percentile instead of a percentage.
 - A missing field or a category the model never saw (for example
   `Contract: "Weekly"`) raises a clear `ValueError` instead of guessing.
 - Scoring all 1,409 held-out customers one at a time through this class gives

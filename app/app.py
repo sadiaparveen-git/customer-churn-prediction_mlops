@@ -118,21 +118,41 @@ def build_payload(
 
 
 def format_result(result):
-    """Markdown for the model's decision."""
-    score = result["churn_score"]
-    threshold = result["threshold"]
+    """Markdown for the model's decision, in plain business terms."""
     if result["likely_to_churn"]:
         headline = "## 🔴 Likely to churn"
         advice = "Consider a retention offer for this customer."
     else:
         headline = "## 🟢 Not likely to churn"
         advice = "No action needed."
-    return (
-        f"{headline}\n\n{advice}\n\n"
-        f"Risk score **{score:.2f}** (a customer is flagged at "
-        f"**{threshold:.2f}** or above). The score ranks customers by risk; "
-        "it is not a percentage chance."
+
+    lines = [headline, advice]
+
+    band = result.get("risk_band")
+    if band:
+        rank = describe_rank(result["risk_percentile"])
+        lines.append(f"**Risk level: {band}**, {rank}")
+        lines.append(
+            "In testing, "
+            f"**{result['observed_churn_rate']:.0%}** of customers at this "
+            "risk level actually left."
+        )
+
+    lines.append(
+        f"<small>Model score {result['churn_score']:.2f}; customers are "
+        f"flagged at {result['threshold']:.2f} or above. The score ranks "
+        "customers by risk; it is not a percentage chance.</small>"
     )
+    return "\n\n".join(lines)
+
+
+def describe_rank(percentile):
+    """'riskier than 22% of customers', without silly 0% / 100% claims."""
+    if percentile < 1:
+        return "among the lowest-risk customers."
+    if percentile > 99:
+        return "among the highest-risk customers."
+    return f"riskier than **{percentile}%** of customers."
 
 
 def predict(*form_values):

@@ -134,6 +134,26 @@ class PredictionResponse(BaseModel):
     likely_to_churn: bool = Field(description="True if score >= threshold")
     label: Literal["Likely to churn", "Not likely to churn"]
     threshold: float = Field(description="Decision threshold that was applied")
+    risk_percentile: int | None = Field(
+        ge=0,
+        le=100,
+        description=(
+            "Whole percent of held-out test customers with a lower score, "
+            "for 'riskier than N% of customers'. Null if the model bundle "
+            "has no score reference."
+        ),
+    )
+    risk_band: Literal["Low", "Moderate", "High", "Very high"] | None = Field(
+        description="Risk level; 'High' and 'Very high' are flagged"
+    )
+    observed_churn_rate: float | None = Field(
+        ge=0,
+        le=1,
+        description=(
+            "Share of held-out test customers in the same risk band who "
+            "actually churned"
+        ),
+    )
 
 
 class ModelInfoResponse(BaseModel):

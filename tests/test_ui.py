@@ -119,6 +119,41 @@ def test_low_risk_customer_is_not_flagged():
     assert "Not likely to churn" in ui.predict(*low_risk)
 
 
+def test_result_shows_risk_level_rank_and_observed_rate(client):
+    direct = client.post("/predict", json=EXAMPLE_CUSTOMER).json()
+    shown = ui.predict(*form_values())
+    assert f"Risk level: {direct['risk_band']}" in shown
+    assert f"{direct['observed_churn_rate']:.0%}" in shown
+    assert str(direct["risk_percentile"]) in shown
+
+
+@pytest.mark.parametrize(
+    "percentile, text",
+    [
+        (0, "among the lowest-risk customers"),
+        (22, "riskier than **22%** of customers"),
+        (100, "among the highest-risk customers"),
+    ],
+)
+def test_rank_wording_avoids_absurd_claims(percentile, text):
+    assert text in ui.describe_rank(percentile)
+
+
+def test_result_still_renders_without_score_context():
+    plain = {
+        "churn_score": 0.12,
+        "likely_to_churn": False,
+        "label": "Not likely to churn",
+        "threshold": 0.47,
+        "risk_percentile": None,
+        "risk_band": None,
+        "observed_churn_rate": None,
+    }
+    text = ui.format_result(plain)
+    assert "Not likely to churn" in text
+    assert "Risk level" not in text
+
+
 def test_the_ui_decision_matches_the_api(client):
     direct = client.post("/predict", json=EXAMPLE_CUSTOMER).json()
     shown = ui.predict(*form_values())

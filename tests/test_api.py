@@ -104,10 +104,24 @@ def test_predict_returns_a_decision(client):
         "likely_to_churn",
         "label",
         "threshold",
+        "risk_percentile",
+        "risk_band",
+        "observed_churn_rate",
     }
     assert 0 <= body["churn_score"] <= 1
     expected = body["churn_score"] >= body["threshold"]
     assert body["likely_to_churn"] == expected
+
+
+def test_shipped_model_gives_score_context(client):
+    """The committed bundle must include score_reference.json."""
+    body = client.post("/predict", json=EXAMPLE_CUSTOMER).json()
+    assert 0 <= body["risk_percentile"] <= 100
+    assert body["risk_band"] in {"Low", "Moderate", "High", "Very high"}
+    assert 0 <= body["observed_churn_rate"] <= 1
+    # The band must agree with the yes/no decision
+    flagged = body["risk_band"] in {"High", "Very high"}
+    assert body["likely_to_churn"] == flagged
 
 
 def test_api_gives_the_same_answer_as_the_predictor(client):

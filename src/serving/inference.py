@@ -13,6 +13,8 @@ The model bundle (written by scripts/export_model.py) is a folder holding:
     model.ubj            the XGBoost model
     feature_schema.json  how to build the features
     model_info.json      the decision threshold and run details
+    score_reference.json (optional) puts a score in context: percentile,
+                         risk band and the churn rate seen in testing
 """
 
 import json
@@ -23,6 +25,7 @@ from xgboost import XGBClassifier
 
 from src.data.preprocess import preprocess_data
 from src.features.build_features import transform_features
+from src.serving.score_reference import ScoreReference
 
 # Bundle location: the MODEL_DIR environment variable if set (for example in
 # a Docker image), otherwise the project's model/ folder
@@ -51,6 +54,15 @@ class ChurnPredictor:
         # it was tuned together with the model, so it must be applied
         self.threshold = float(self.info["threshold"])
 
+        # Context for the raw score (see score_reference.py). Optional, so an
+        # older bundle without it still works; the fields are then None.
+        self.reference = ScoreReference.load(model_dir)
+        if self.reference and self.reference.run_id != self.info.get("run_id"):
+            raise ValueError(
+                "score_reference.json was built for a different model run; "
+                "rebuild it with scripts/build_score_reference.py"
+            )
+
         if self.model.n_features_in_ != len(self.schema["columns"]):
             raise ValueError(
                 f"Model expects {self.model.n_features_in_} features but the "
@@ -75,6 +87,12 @@ class ChurnPredictor:
               likely_to_churn: True if the score reaches the threshold
               label: "Likely to churn" or "Not likely to churn"
               threshold: the decision threshold that was applied
+              risk_percentile: whole percent of test customers with a lower
+                  score ("riskier than 22% of customers")
+              risk_band: "Low", "Moderate", "High" or "Very high"
+              observed_churn_rate: share of test customers in the same band
+                  who actually churned
+              (the last three are None if the bundle has no reference)
 
         Raises:
             ValueError: a required field is missing, or a categorical field
@@ -87,9 +105,20 @@ class ChurnPredictor:
         score = float(self.model.predict_proba(features)[0, 1])
         likely = score >= self.threshold
 
+        context = (
+            self.reference.lookup(score)
+            if self.reference
+            else {
+                "risk_percentile": None,
+                "risk_band": None,
+                "observed_churn_rate": None,
+            }
+        )
+
         return {
             "churn_score": score,
             "likely_to_churn": likely,
             "label": "Likely to churn" if likely else "Not likely to churn",
             "threshold": self.threshold,
+            **context,
         }
