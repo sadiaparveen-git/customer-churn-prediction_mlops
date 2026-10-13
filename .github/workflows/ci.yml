@@ -1,8 +1,13 @@
-# Continuous integration: runs on every push and pull request to main.
+# CI/CD: runs on every push and pull request to main.
 #   1. test   - the full pytest suite (uses synthetic data, no raw CSV needed)
 #   2. docker - builds the serving image and checks the running container
+#   3. push   - on pushes to main only: publishes the image to Docker Hub
+#
+# Repository secrets needed for the push job (Settings > Secrets and
+# variables > Actions): DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (an access
+# token created in Docker Hub, not your password).
 
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -10,10 +15,12 @@ on:
   pull_request:
     branches: [main]
 
-# A newer push to the same branch cancels the run that is still going
+# One run per branch at a time
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded pull request runs, but let a run on main finish so an
+  # image is never left half-published
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -96,3 +103,42 @@ jobs:
       - name: Show container logs on failure
         if: failure()
         run: docker logs churn-api
+
+  push:
+    # Publish only after both the tests and the container check pass, and only
+    # for pushes to main (pull requests also trigger this workflow)
+    needs: [test, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Seven characters, like `git rev-parse --short`; used as the version tag
+      - name: Compute the short commit SHA
+        id: vars
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # Two tags: :latest always points at the newest image; :<sha> is
+      # permanent, so any earlier version can be pulled or rolled back to
+      - name: Build and push the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false # keep the Docker Hub tag list clean
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/customer-churn-mlops:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/customer-churn-mlops:${{ steps.vars.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
