@@ -1,6 +1,7 @@
 # CI/CD: runs on every push and pull request to main.
 #   1. test   - the full pytest suite (uses synthetic data, no raw CSV needed)
 #   2. docker - builds the serving image and checks the running container
+#               (/health, /model-info, /predict and the /ui web page)
 #   3. push   - on pushes to main only: publishes the image to Docker Hub
 #
 # Repository secrets needed for the push job (Settings > Secrets and
@@ -96,6 +97,9 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/health
           curl -sf http://127.0.0.1:8000/model-info
+          # The web page: /ui redirects to /ui/, so follow redirects and
+          # require a final 200
+          test "$(curl -sL -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/ui)" = 200
           curl -sf -X POST http://127.0.0.1:8000/predict \
             -H "Content-Type: application/json" \
             -d '{"gender":"Female","SeniorCitizen":0,"Partner":"Yes","Dependents":"No","tenure":1,"PhoneService":"No","MultipleLines":"No phone service","InternetService":"DSL","OnlineSecurity":"No","OnlineBackup":"Yes","DeviceProtection":"No","TechSupport":"No","StreamingTV":"No","StreamingMovies":"No","Contract":"Month-to-month","PaperlessBilling":"Yes","PaymentMethod":"Electronic check","MonthlyCharges":29.85,"TotalCharges":29.85}'

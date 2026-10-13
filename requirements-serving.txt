@@ -1,4 +1,5 @@
-# Runtime dependencies for the prediction API (used by docker/Dockerfile).
+# Runtime dependencies for the prediction API and web page (used by
+# docker/Dockerfile).
 # Pinned to the exact versions the model was trained and tested with, so the
 # container behaves like the local environment. Training and development
 # tools (MLflow, Optuna, Great Expectations, pytest, ...) stay in
@@ -6,6 +7,10 @@
 fastapi==0.141.1
 uvicorn==0.53.0
 pydantic==2.13.5
+# The web page (Gradio) is mounted inside the API, and calls it over HTTP
+# with requests
+gradio==6.30.0
+requests==2.34.2
 # XGBoost 3.2.0 in both cases. The default wheel bundles GPU libraries (~700 MB
 # in the image) that CPU serving never uses. x86_64 (the usual AWS target) gets
 # the CPU-only build; it has no ARM Linux wheel for 3.2.0, so ARM (e.g. Docker

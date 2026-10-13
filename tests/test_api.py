@@ -73,6 +73,18 @@ def test_root_redirects_to_the_docs(client):
     assert response.headers["location"] == "/docs"
 
 
+def test_web_page_is_served_under_ui(client):
+    """The Gradio page is mounted inside the API (one process, one port)."""
+    response = client.get("/ui", follow_redirects=True)
+    assert response.status_code == 200
+    assert "Customer Churn Prediction" in response.text
+
+
+def test_model_is_loaded_when_the_ui_is_mounted(client):
+    """Mounting the page must not replace the startup that loads the model."""
+    assert isinstance(client.app.state.predictor, ChurnPredictor)
+
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200

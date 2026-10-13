@@ -152,7 +152,7 @@ The analysis lives in `notebooks/EDA.ipynb`. In short:
 │   └── external/
 ├── artifacts/                 # Saved model + feature schema (generated)
 ├── mlruns/                    # MLflow tracking data (generated)
-├── app/                       # FastAPI service (main.py) and Gradio UI (app.py)
+├── app/                       # FastAPI service (main.py) + Gradio page (app.py)
 ├── docker/                    # Dockerfile for the prediction API
 ├── configs/                   # Reserved for configuration files
 ├── .github/workflows/         # CI: tests + Docker build (ci.yml)
@@ -351,12 +351,14 @@ predictor.predict({
 - This class is what the FastAPI service in `app/` calls, and the web UI
   uses it through that API.
 
-## Running the API
+## Running the API and web page
 
-The service wraps the predictor behind three endpoints:
+One process serves both the REST API and the Gradio web page:
 
-| Endpoint | Purpose |
-| -------- | ------- |
+| URL | What it is |
+| --- | ---------- |
+| `/ui` | The web page: fill in a customer, see the risk level |
+| `/docs` | Interactive API documentation |
 | `GET /health` | Is the service up? |
 | `GET /model-info` | Which model is served: run ID, threshold, test metrics |
 | `POST /predict` | Score one customer (JSON in the same fields as above) |
@@ -367,39 +369,53 @@ Start it from the project root:
 uvicorn app.main:app --reload
 ```
 
-Then open http://127.0.0.1:8000/docs for interactive documentation where you
-can try every endpoint in the browser. A request with an invalid value, such
-as `"Contract": "Weekly"`, is rejected with a `422` error that names the field.
+Then open http://127.0.0.1:8000/ui for the web page, or
+http://127.0.0.1:8000/docs to try the endpoints in the browser. A request with
+an invalid value, such as `"Contract": "Weekly"`, is rejected with a `422`
+error that names the field.
 
-### Web UI
+### The web page
 
-A Gradio page lets anyone try the model without writing JSON. It calls the API
-over HTTP instead of loading the model, so the decision threshold and the
-validation rules live in one place. With the API running, start the UI in a
-second terminal:
+The page is mounted inside the FastAPI app, but it is still an ordinary client
+of the API: it sends the form to `POST /predict` over HTTP instead of loading
+the model, so the decision threshold and the validation rules live in one
+place. The form cannot create contradictory input: choosing "No" for phone
+service fixes "Multiple lines", and choosing "No" for internet service fixes
+every add-on.
+
+The model is loaded when the service starts, before it accepts any request, so
+the page never runs without it. The page finds the API at `API_URL`, which
+defaults to `http://127.0.0.1:8000`. If you run the service on another port,
+set it to match, for example
+`API_URL=http://127.0.0.1:9000 uvicorn app.main:app --port 9000`.
+
+To run the page on its own (for example against an API running elsewhere):
 
 ```bash
-python -m app.app
+API_URL=http://localhost:8000 python -m app.app     # opens on port 7860
 ```
-
-Then open http://127.0.0.1:7860. The form cannot create contradictory input:
-choosing "No" for phone service fixes "Multiple lines", and choosing "No" for
-internet service fixes every add-on. To point the UI at an API on another
-address, set `API_URL`, for example
-`API_URL=http://localhost:8000 python -m app.app`.
 
 ### With Docker
 
-The image needs only the `model/` bundle, not the training tools:
+The image holds the API and the web page, plus the `model/` bundle, but none
+of the training tools:
 
 ```bash
 docker build -f docker/Dockerfile -t churn-api .
 docker run --rm -p 8000:8000 churn-api
 ```
 
-The API is then available at http://127.0.0.1:8000, same as above. The image
-is about 500 MB on x86_64 (the usual cloud target) and about 760 MB on ARM
-(for example Docker on an Apple Silicon Mac).
+Then open http://127.0.0.1:8000/ui. The image is about 660 MB on x86_64
+(the usual cloud target) and about 920 MB on ARM (for example Docker on an
+Apple Silicon Mac).
+
+Every push to `main` that passes the tests also publishes the image to Docker
+Hub as `<username>/customer-churn-mlops`, tagged `latest` and with the short
+commit hash, so any earlier version can be pulled:
+
+```bash
+docker run --rm -p 8000:8000 <username>/customer-churn-mlops:latest
+```
 
 ## Using your own data
 

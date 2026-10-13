@@ -217,7 +217,9 @@ def estimate_total(tenure, monthly):
 
 def build_ui():
     example = EXAMPLE_CUSTOMER
-    with gr.Blocks(title="Customer Churn Prediction") as demo:
+    with gr.Blocks(
+        title="Customer Churn Prediction", analytics_enabled=False
+    ) as demo:
         gr.Markdown(
             "# Customer Churn Prediction\n"
             "Enter a telecom customer's details to see whether they are "
