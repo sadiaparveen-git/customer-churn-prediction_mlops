@@ -73,8 +73,10 @@ Predictor = Annotated[ChurnPredictor, Depends(get_predictor)]
 
 @app.get("/", include_in_schema=False)
 def root():
-    """The API has no page of its own; send visitors to the documentation."""
-    return RedirectResponse(url="/docs")
+    """Send visitors to the web page (the API docs are at /docs)."""
+    # Straight to /ui/ (with the slash) so there is no second redirect, and
+    # the relative address keeps the right scheme behind an HTTPS proxy
+    return RedirectResponse(url="/ui/")
 
 
 @app.get("/health", response_model=HealthResponse)

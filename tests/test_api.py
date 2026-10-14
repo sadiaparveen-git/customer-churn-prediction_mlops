@@ -67,10 +67,13 @@ HIGH_RISK = payload(
 # === Service endpoints ===
 
 
-def test_root_redirects_to_the_docs(client):
+def test_root_redirects_to_the_web_page(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code in (302, 307)
-    assert response.headers["location"] == "/docs"
+    assert response.headers["location"] == "/ui/"
+
+    # ...and that page really is served, with no further redirect
+    assert client.get("/ui/", follow_redirects=False).status_code == 200
 
 
 def test_web_page_is_served_under_ui(client):
