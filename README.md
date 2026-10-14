@@ -1,5 +1,8 @@
 # Customer Churn Prediction (MLOps)
 
+[![CI/CD](https://github.com/sadiaparveen-git/customer-churn-prediction_mlops/actions/workflows/ci.yml/badge.svg)](https://github.com/sadiaparveen-git/customer-churn-prediction_mlops/actions/workflows/ci.yml)
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-sadiaparveen%2Fcustomer--churn--mlops-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/sadiaparveen/customer-churn-mlops)
+
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![pandas](https://img.shields.io/badge/pandas-150458?style=for-the-badge&logo=pandas&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)
@@ -9,457 +12,196 @@
 ![Great Expectations](https://img.shields.io/badge/Great%20Expectations-FF6310?style=for-the-badge)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=for-the-badge&logo=pydantic&logoColor=white)
+![Gradio](https://img.shields.io/badge/Gradio-F97316?style=for-the-badge)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
+![AWS ECS](https://img.shields.io/badge/AWS%20ECS-FF9900?style=for-the-badge&logo=amazonecs&logoColor=white)
 ![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)
 
-An end-to-end machine learning project that predicts which telecom customers
-are likely to leave ("churn"). It covers the full workflow: data validation,
-feature engineering, hyperparameter tuning, training and evaluation, with
-every run tracked in MLflow. The trained model is served through a FastAPI
-service that runs in a Docker container.
+Telecom churn model (XGBoost, tuned for recall) with MLflow tracking, served by
+FastAPI and Gradio from one Docker image, tested and published by GitHub
+Actions, and deployed to AWS ECS.
 
-## Why this project
+## Links
 
-Keeping a customer is cheaper than winning a new one. A retention team can
-only contact so many people, so the model's job is to produce a short list of
-customers who are most likely to leave.
+- **Live demo:** https://ch-2be24e3703004356be1576050507f7de.ecs.eu-west-1.on.aws/ui
+<!-- - **Hugging Face Spaces:** TODO -->
+- **Video walkthrough:** TODO
+- **Docker:** `docker pull sadiaparveen/customer-churn-mlops:latest`
 
-The two kinds of mistakes are not equally costly:
-
-- **Missing a churner** loses a customer for good.
-- **Flagging a loyal customer** only wastes a retention offer.
-
-So this project is tuned to **catch most churners (recall)** while keeping the
-flagged list **as accurate as possible (precision)**.
-
-## Highlights
-
-- **One-command pipeline.** Load, validate, preprocess, build features, tune,
-  train, evaluate and save, all from `scripts/run_pipeline.py`.
-- **Data quality gate.** 23 Great Expectations checks run first. Bad data stops
-  the pipeline before any training happens.
-- **Recall-first tuning.** Optuna maximises churn precision while guaranteeing
-  a minimum churn recall. It also tunes the class weight and the decision
-  threshold.
-- **No data leakage.** Tuning only ever sees the training split. The test set
-  is used once, at the end.
-- **Experiment tracking.** Parameters, metrics, dataset and model are logged
-  to MLflow for every run.
-- **Reproducible.** Fixed seeds throughout, so a rerun gives the same result.
-- **Tested.** 101 automated tests cover the pipeline, feature engineering, the
-  tuner, the model export, the prediction code, the API and the UI.
-- **Same features in training and serving.** Feature engineering learns its
-  encodings once and saves them, so a single customer is encoded exactly as
-  in training.
-- **Serving-ready model bundle.** One command exports a small `model/` folder
-  (model, feature schema and decision threshold), and a ready-made predictor
-  loads it.
-- **Validated REST API.** FastAPI and Pydantic reject bad input (wrong
-  category, out-of-range number, missing field) with a clear error before the
-  model ever sees it.
-- **Containerised.** A slim, non-root Docker image with a health check serves
-  the model; its predictions match the local ones.
+<!-- TODO: add screenshots, e.g. ![Web UI](docs/images/ui.png) and ![ECS service](docs/images/ecs.png) -->
 
 ## Results
 
-Example run on the held-out test set (1,409 customers, about 27% of whom
-churn):
+Held-out test set: 1,409 customers, 374 churners (26.5%). Decision threshold 0.469.
 
-| Metric (churn class)       | Value |
-| -------------------------- | ----- |
-| Recall                     | 0.837 |
-| Precision                  | 0.479 |
-| F1 score                   | 0.609 |
-| ROC AUC                    | 0.835 |
-| Decision threshold (tuned) | 0.469 |
+| Metric (churn class) | Value                                               |
+| -------------------- | --------------------------------------------------- |
+| Recall               | 0.837 (313 of 374 churners caught)                  |
+| Precision            | 0.479 (313 of 654 customers flagged)                |
+| F1                   | 0.609                                               |
+| PR-AUC               | 0.642 (a random model scores 0.265, the churn rate) |
+| ROC-AUC              | 0.835                                               |
 
-**In plain terms:** the model catches about 84% of the customers who leave
-(313 of 374). Of the 654 customers it flags, about 48% really would churn,
-roughly 1.8 times better than contacting customers at random.
+Recall is the priority because a missed churner is lost revenue, while a false
+alarm only costs a retention offer.
 
-The minimum recall is a setting (`--min_recall`, default 0.80). Raising it
-catches more churners but flags more loyal customers too. Choose it based on
-what a retention offer costs compared with losing a customer.
+Source: recall, precision, F1 and ROC-AUC are in `model/model_info.json` (MLflow
+run `e04cbcc2…`). PR-AUC is not logged to MLflow; it was computed from the
+shipped model on the same reproduced test split.
 
-The model was tuned on a validation split and scored on a test set it had
-never seen. The two agreed closely, so the result is not an artefact of
-tuning.
+## Data science decisions
 
-## How it works
+**Business goal.**
+Problem: a missed churner loses the customer; a false alarm costs one retention offer.
+Solution: tune for churn-class recall of at least 0.80, then maximise precision.
 
-The pipeline runs these stages in order, inside a single MLflow run:
+**Class imbalance.**
+Problem: only 26.5% of customers churn, so the model favours "stay".
+Solution: XGBoost's class weight (`scale_pos_weight`), searched by Optuna between 1 and 2x the class ratio (chosen: 5.30). Churners then count more in training and the data itself is left unchanged.
 
-| Stage | What happens | Code |
-| ----- | ------------ | ---- |
-| 1. Load | Read the raw CSV | `src/data/load_data.py` |
-| 2. Validate | 23 Great Expectations checks: required columns, allowed values, numeric ranges, consistency | `src/utils/validate_data.py` |
-| 3. Preprocess | Drop the customer ID, fix `TotalCharges` (blank text to number), turn `Churn` into 0/1, fill missing numbers. Saved to `data/processed/` | `src/data/preprocess.py` |
-| 4. Build features | Yes/No and two-value columns become 0/1; other categories are one-hot encoded (30 features). The encodings are saved as a schema so serving can repeat them exactly | `src/features/build_features.py` |
-| 5. Split | 80% train / 20% test, stratified so both keep the same churn rate | `scripts/run_pipeline.py` |
-| 6. Tune | Optuna runs 20 trials on the training data only | `src/models/tune.py` |
-| 7. Train | XGBoost is trained with the best settings found | `src/models/train.py` |
-| 8. Evaluate | Scored once on the untouched test set | `src/models/evaluate.py` |
-| 9. Save | Model and feature list written for serving | `scripts/run_pipeline.py` |
+**Decision threshold.**
+Problem: the default 0.5 cut-off misses too many churners.
+Solution: Optuna (seeded TPE sampler, 20 trials) searches the XGBoost parameters, the class weight and a threshold between 0.25 and 0.5 together. A trial scores its churn precision if its recall is at least 0.80, otherwise it is ranked below all trials that meet the floor. Among trials within 0.01 precision of the best, higher recall wins. Result: threshold 0.469.
 
-### How tuning works
+**No data leakage.**
+Problem: tuning on the test data would inflate the results.
+Solution: scikit-learn's `train_test_split` makes one stratified 80/20 train/test split. Tuning splits the training part again (4,507 fit / 1,127 validation rows) and picks parameters and threshold on the validation rows only. The final model is refit on all 5,634 training rows, and the test set is used once, for the reported metrics.
 
-Each Optuna trial tries a combination of XGBoost settings, a class weight
-(how much more a missed churner counts than a missed loyal customer) and a
-decision threshold between 0.25 and 0.5.
+**Metrics.**
+Problem: accuracy hides failure; always predicting "no churn" scores 73.5%.
+Solution: report churn-class recall, precision, F1, PR-AUC and ROC-AUC (scikit-learn). PR-AUC is not inflated by the many easy "stay" customers.
 
-A trial is judged like this:
+**Reading the score.**
+Problem: with class weighting the score is not a probability, so "0.12" cannot be shown as a 12% chance.
+Solution: `scripts/build_score_reference.py` scores the test customers once and saves four risk levels (with the share who really churned) and a percentile table. The API returns the level and the percentile with every prediction.
 
-1. It must catch at least the minimum share of churners (default 80%).
-   Trials that do not are ranked below every trial that does.
-2. Among the rest, the highest precision wins.
-3. If another trial catches more churners at nearly the same precision
-   (within 0.01), that one is preferred.
+| Risk level | Score        | Test customers | Actually churned |
+| ---------- | ------------ | -------------- | ---------------- |
+| Low        | below 0.20   | 530            | 4%               |
+| Moderate   | 0.20 to 0.47 | 225            | 17%              |
+| High       | 0.47 to 0.85 | 412            | 36%              |
+| Very high  | 0.85 and up  | 242            | 68%              |
 
-The search is seeded, so it returns the same answer every time.
+"High" starts at the decision threshold, so the level always agrees with the yes/no decision.
 
-### What the exploration found
+**Same features in training and serving.**
+Problem: one customer sent to the API must be encoded exactly as in training.
+Solution: `fit_features` learns the encodings once and saves them as `feature_schema.json`; `transform_features` applies them in both training and serving. pytest checks that one row gives the same features and the same score as the same row in a batch.
 
-The analysis lives in `notebooks/EDA.ipynb`. In short:
+## MLOps architecture
 
-- About 27% of customers churn, so the classes are imbalanced. Accuracy alone
-  would be misleading, which is why recall and precision are the focus.
-- Customers with longer tenure or a one/two-year contract churn much less.
-- Fiber optic internet and electronic-check payment go with higher churn.
-- RandomForest, LightGBM and XGBoost were compared. XGBoost gave similar
-  recall to LightGBM and trained about three times faster, so it was chosen.
+```mermaid
+flowchart LR
+    A["Telco CSV"] --> B["Validate<br/>Great Expectations"]
+    B --> C["Features, Optuna tuning,<br/>XGBoost training"]
+    C --> D[("MLflow runs")]
+    D --> E["export_model.py<br/>model/ bundle"]
+    E --> F["FastAPI + Gradio<br/>one container, port 8000"]
+    F --> G["Docker image"]
+    G --> H["GitHub Actions<br/>test, container smoke test, push"]
+    H --> I["Docker Hub<br/>:latest and :sha"]
+    I --> J["AWS ECS Express Mode<br/>Fargate + ALB, HTTPS"]
+```
+
+- **Pinned serving dependencies.** `requirements-serving.txt` pins exact
+  versions; the CPU-only `xgboost-cpu` build is used on x86_64.
+- **Small image.** `python:3.11-slim`, non-root user, no training tools or
+  MLflow. 659 MB unpacked on x86_64 (219 MB compressed on Docker Hub).
+- **Health endpoint.** `/health` backs both the Docker `HEALTHCHECK` and the
+  load balancer check.
+- **SHA tags.** Every push to `main` that passes the tests publishes
+  `:latest` and `:<short commit sha>`, so any version can be redeployed. The
+  demo runs a SHA tag.
+- **Secrets.** Docker Hub credentials are GitHub Actions secrets, never in the
+  repo.
+- **Model bundle in git.** The 1.3 MB `model/` folder is committed, so
+  deployment needs no MLflow or retraining.
+
+The CI pipeline (`.github/workflows/ci.yml`) runs 103 tests, builds the image,
+starts it and checks `/health`, `/model-info`, `/predict` and `/ui`, and only
+then pushes to Docker Hub.
+
+## Run it yourself
+
+```bash
+docker pull sadiaparveen/customer-churn-mlops:latest
+docker run --rm -p 8000:8000 sadiaparveen/customer-churn-mlops:latest
+```
+
+- Web UI: http://127.0.0.1:8000/ui
+- API docs: http://127.0.0.1:8000/docs
+
+The image is built for `linux/amd64`. On Apple Silicon, Docker runs it under
+emulation, or build your own with `docker build -f docker/Dockerfile -t churn-api .`.
+
+### Local development
+
+Needs Python 3.11 and the IBM Telco Customer Churn CSV saved as
+`data/raw/Telcom-Customer-Churn.csv` (not in the repo). On macOS, run
+`brew install libomp` once.
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python scripts/run_pipeline.py            # validate, tune, train, evaluate, log to MLflow
+python scripts/export_model.py            # write the model/ bundle from the latest run
+python scripts/build_score_reference.py   # add risk levels and percentiles to the bundle
+uvicorn app.main:app --reload             # UI at /ui, docs at /docs on port 8000
+pytest tests                              # 103 tests
+```
+
+View runs with `MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri ./mlruns`.
 
 ## Project structure
 
 ```
 .
-├── scripts/
-│   ├── run_pipeline.py        # Runs the whole workflow (start here)
-│   ├── export_model.py        # Exports the trained model as a serving bundle
-│   └── build_score_reference.py  # Adds risk bands and percentiles to the bundle
+├── app/
+│   ├── main.py                   # FastAPI service: /predict, /health, /model-info; mounts the UI at /ui
+│   ├── schemas.py                # Pydantic request/response models and input validation
+│   └── app.py                    # Gradio web page (calls the API over HTTP)
 ├── src/
-│   ├── data/                  # load_data.py, preprocess.py
-│   ├── features/              # build_features.py (fit + transform)
-│   ├── models/                # tune.py, train.py, evaluate.py
-│   ├── serving/               # inference.py, score_reference.py
-│   └── utils/                 # validate_data.py (Great Expectations)
-├── model/                     # Serving bundle: model, schema, threshold, score context
-├── tests/                     # Pipeline, features, tuner, inference, API tests
-├── notebooks/
-│   └── EDA.ipynb              # Exploration and model comparison
-├── data/
-│   ├── raw/                   # Put the dataset here (not tracked by git)
-│   ├── processed/             # Cleaned data written by the pipeline
-│   └── external/
-├── artifacts/                 # Saved model + feature schema (generated)
-├── mlruns/                    # MLflow tracking data (generated)
-├── app/                       # FastAPI service (main.py) + Gradio page (app.py)
-├── docker/                    # Dockerfile for the prediction API
-├── configs/                   # Reserved for configuration files
-├── .github/workflows/         # CI: tests + Docker build (ci.yml)
-├── requirements.txt           # Pinned training/development dependencies
-└── requirements-serving.txt   # Pinned dependencies for the Docker image
+│   ├── data/
+│   │   ├── load_data.py          # Read the raw CSV
+│   │   └── preprocess.py         # Clean the data, turn Churn into 0/1
+│   ├── features/
+│   │   └── build_features.py     # Fit/transform encoding, saved as feature_schema.json
+│   ├── models/
+│   │   ├── tune.py               # Optuna search: parameters, class weight, threshold
+│   │   ├── train.py              # Train XGBoost, log to MLflow
+│   │   └── evaluate.py           # Test-set metrics
+│   ├── serving/
+│   │   ├── inference.py          # ChurnPredictor: scores one customer
+│   │   └── score_reference.py    # Risk level and percentile lookup
+│   └── utils/
+│       └── validate_data.py      # 23 Great Expectations checks
+├── scripts/
+│   ├── run_pipeline.py           # Runs the whole workflow (start here)
+│   ├── export_model.py           # Exports an MLflow run as the model/ bundle
+│   └── build_score_reference.py  # Builds risk levels and percentiles for the bundle
+├── model/                        # Committed serving bundle (~1.3 MB)
+│   ├── model.ubj                 # XGBoost model
+│   ├── feature_schema.json       # Encodings and exact column order
+│   ├── model_info.json           # Threshold, run ID, test metrics
+│   └── score_reference.json      # Risk levels and sorted test scores
+├── tests/                        # 103 pytest tests (synthetic data, no CSV needed)
+├── docker/Dockerfile             # Serving image (API + web page)
+├── notebooks/EDA.ipynb           # Exploration and model comparison
+├── .github/workflows/ci.yml      # Test, container smoke test, push to Docker Hub
+├── data/                         # raw/ (put the CSV here), processed/ (generated); not in git
+├── artifacts/, mlruns/           # Generated by the pipeline; not in git
+├── configs/                      # Reserved for configuration files
+├── requirements.txt              # Pinned training and development dependencies
+└── requirements-serving.txt      # Pinned dependencies for the Docker image
 ```
 
-Folders marked "generated" are created when you run the pipeline. Data,
-artifacts and MLflow runs are listed in `.gitignore`, so they are not
-committed. The small `model/` bundle is the exception: it is committed so the
-service can be built and deployed without retraining.
-
-## Getting started
-
-### Prerequisites
-
-- Python 3.11 (the version this project was developed and tested with)
-- Git
-- macOS only: the OpenMP library that XGBoost and LightGBM need.
-  Install it with `brew install libomp`.
-
-### 1. Download the project
-
-```bash
-git clone https://github.com/sadiaparveen-git/customer-churn-prediction_mlops.git
-cd customer-churn-prediction_mlops
-```
-
-### 2. Create a virtual environment and install dependencies
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. Add the dataset
-
-The dataset is not stored in the repository. Download the **IBM Telco
-Customer Churn** dataset (7,043 customers, 21 columns; it is available on
-Kaggle) and save it as:
-
-```
-data/raw/Telcom-Customer-Churn.csv
-```
-
-The file name matters (note the spelling "Telcom"). To use a different path,
-pass `--input path/to/file.csv` in the next step.
-
-### 4. Run the pipeline
-
-```bash
-python scripts/run_pipeline.py
-```
-
-It takes about a minute. You will see each stage print its progress, and the
-test-set classification report at the end.
-
-### 5. Look at the results in MLflow
-
-```bash
-MLFLOW_ALLOW_FILE_STORE=true mlflow ui --backend-store-uri ./mlruns
-```
-
-Then open http://127.0.0.1:5000 in your browser. Each run shows its settings,
-metrics, training dataset and saved model. (On Windows PowerShell, first run
-`$env:MLFLOW_ALLOW_FILE_STORE="true"`.)
-
-### 6. Run the tests
-
-```bash
-pytest tests -v
-```
-
-The tests build a small synthetic dataset, so they do not need the real CSV
-and they do not touch your own `artifacts/`, `data/processed/` or `mlruns/`.
-They take about a minute and a half.
-
-## Configuration
-
-All run-level settings are options on the pipeline script:
-
-| Option | Default | Meaning |
-| ------ | ------- | ------- |
-| `--input` | `data/raw/Telcom-Customer-Churn.csv` | Path to the raw CSV |
-| `--target` | `Churn` | Name of the column to predict |
-| `--min_recall` | `0.80` | Minimum churn recall tuning must keep |
-| `--threshold_min` | `0.25` | Lowest decision threshold to try |
-| `--threshold_max` | `0.5` | Highest decision threshold to try |
-| `--test_size` | `0.2` | Share of data held out for testing |
-| `--experiment` | `Telco Churn - XGBoost` | MLflow experiment name |
-| `--mlflow_uri` | `<project>/mlruns` | Where MLflow stores runs |
-
-Example: favour recall more strongly.
-
-```bash
-python scripts/run_pipeline.py --min_recall 0.85
-```
-
-## What a run produces
-
-| Output | Location |
-| ------ | -------- |
-| Cleaned data | `data/processed/telco_churn_processed.csv` |
-| Trained model | `artifacts/model.joblib` |
-| Feature schema: encodings and the exact column order | `artifacts/feature_schema.json` |
-| Logged run (settings, metrics, dataset, model) | `mlruns/` |
-
-## Exporting the model for serving
-
-`mlruns/` holds every run and is meant for tracking, not for deployment.
-To hand one model to a prediction service, export it:
-
-```bash
-python scripts/export_model.py
-```
-
-This writes a small bundle to `model/` from the latest finished run (use
-`--run_id` to pick another):
-
-| File | Purpose |
-| ---- | ------- |
-| `model.ubj` | The XGBoost model in its native format (no pickle) |
-| `feature_schema.json` | How to build the features: encodings and the exact column order |
-| `model_info.json` | Decision threshold, run ID, test metrics, tuned settings and XGBoost version |
-| `score_reference.json` | Context for a score: how it ranks and what happened to similar customers (see below) |
-
-The decision threshold lives in `model_info.json`. A service must apply it to
-the model's probability, otherwise the recall and precision above will not
-hold.
-
-The bundle is about 1.3 MB, so it is committed to the repository. Promoting a
-new model is then four steps: run the pipeline, run the export, build the
-score reference, commit.
-
-### Making the score meaningful
-
-A raw score such as 0.12 means little to a business user, and it is not a
-probability. So the export is followed by:
-
-```bash
-python scripts/build_score_reference.py
-```
-
-It rebuilds the held-out test set (same data, same seeded split as the
-pipeline), scores it with the exported model and checks that recall and
-precision match the training run. It then saves `score_reference.json`, which
-lets the API answer in plain terms:
-
-| Risk level | Model score | Test customers | Actually churned |
-| ---------- | ----------- | -------------- | ---------------- |
-| Low        | below 0.20  | 530            | 4%               |
-| Moderate   | 0.20 to 0.47 | 225           | 17%              |
-| High       | 0.47 to 0.85 | 412           | 36%              |
-| Very high  | 0.85 and up | 242            | 68%              |
-
-(For comparison, 27% of all test customers churned.) "High" starts at the
-decision threshold, so the risk level always agrees with the Likely / Not
-likely decision. The response also says how the customer ranks, for example
-"riskier than 90% of customers". This needs no retraining and no change to the
-pipeline. The script refuses to run if the data does not match the model.
-
-## Making a prediction
-
-`ChurnPredictor` loads the bundle and scores one customer from the raw fields,
-exactly as they appear in the dataset. Run this from the project root:
-
-```python
-from src.serving.inference import ChurnPredictor
-
-predictor = ChurnPredictor()   # loads model/ (or the folder in $MODEL_DIR)
-
-predictor.predict({
-    "gender": "Female", "SeniorCitizen": 0, "Partner": "Yes",
-    "Dependents": "No", "tenure": 1, "PhoneService": "No",
-    "MultipleLines": "No phone service", "InternetService": "DSL",
-    "OnlineSecurity": "No", "OnlineBackup": "Yes", "DeviceProtection": "No",
-    "TechSupport": "No", "StreamingTV": "No", "StreamingMovies": "No",
-    "Contract": "Month-to-month", "PaperlessBilling": "Yes",
-    "PaymentMethod": "Electronic check",
-    "MonthlyCharges": 29.85, "TotalCharges": 29.85,
-})
-# {'churn_score': 0.913, 'likely_to_churn': True,
-#  'label': 'Likely to churn', 'threshold': 0.469,
-#  'risk_percentile': 90, 'risk_band': 'Very high',
-#  'observed_churn_rate': 0.6777}
-```
-
-- The decision is `churn_score >= threshold`. The score is **not** a
-  calibrated probability (the model is trained with a class weight), so show
-  the label, the risk level and the percentile instead of a percentage.
-- A missing field or a category the model never saw (for example
-  `Contract: "Weekly"`) raises a clear `ValueError` instead of guessing.
-- Scoring all 1,409 held-out customers one at a time through this class gives
-  the same recall (0.837) and precision (0.479) as the training run.
-- This class is what the FastAPI service in `app/` calls, and the web UI
-  uses it through that API.
-
-## Running the API and web page
-
-One process serves both the REST API and the Gradio web page:
-
-| URL | What it is |
-| --- | ---------- |
-| `/ui` | The web page: fill in a customer, see the risk level |
-| `/docs` | Interactive API documentation |
-| `GET /health` | Is the service up? |
-| `GET /model-info` | Which model is served: run ID, threshold, test metrics |
-| `POST /predict` | Score one customer (JSON in the same fields as above) |
-
-Start it from the project root:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Then open http://127.0.0.1:8000/ui for the web page, or
-http://127.0.0.1:8000/docs to try the endpoints in the browser. A request with
-an invalid value, such as `"Contract": "Weekly"`, is rejected with a `422`
-error that names the field.
-
-### The web page
-
-The page is mounted inside the FastAPI app, but it is still an ordinary client
-of the API: it sends the form to `POST /predict` over HTTP instead of loading
-the model, so the decision threshold and the validation rules live in one
-place. The form cannot create contradictory input: choosing "No" for phone
-service fixes "Multiple lines", and choosing "No" for internet service fixes
-every add-on.
-
-The model is loaded when the service starts, before it accepts any request, so
-the page never runs without it. The page finds the API at `API_URL`, which
-defaults to `http://127.0.0.1:8000`. If you run the service on another port,
-set it to match, for example
-`API_URL=http://127.0.0.1:9000 uvicorn app.main:app --port 9000`.
-
-To run the page on its own (for example against an API running elsewhere):
-
-```bash
-API_URL=http://localhost:8000 python -m app.app     # opens on port 7860
-```
-
-### With Docker
-
-The image holds the API and the web page, plus the `model/` bundle, but none
-of the training tools:
-
-```bash
-docker build -f docker/Dockerfile -t churn-api .
-docker run --rm -p 8000:8000 churn-api
-```
-
-Then open http://127.0.0.1:8000/ui. The image is about 660 MB on x86_64
-(the usual cloud target) and about 920 MB on ARM (for example Docker on an
-Apple Silicon Mac).
-
-Every push to `main` that passes the tests also publishes the image to Docker
-Hub as `<username>/customer-churn-mlops`, tagged `latest` and with the short
-commit hash, so any earlier version can be pulled:
-
-```bash
-docker run --rm -p 8000:8000 <username>/customer-churn-mlops:latest
-```
-
-## Using your own data
-
-The pipeline structure is generic, but the checks and cleaning are written
-for the Telco dataset. To adapt it to other data, review these files first:
-
-- `src/utils/validate_data.py`: the column names, allowed values and ranges.
-- `src/data/preprocess.py`: the cleaning steps (for example `TotalCharges`).
-- `--target`: the name of your label column (expected to be Yes/No or 0/1).
-
-## Roadmap
-
-- [x] Exploratory analysis and model comparison
-- [x] Modular, tested pipeline with data validation
-- [x] Hyperparameter tuning with MLflow experiment tracking
-- [x] Export of a small, committed serving bundle
-- [x] Prediction code shared by training and serving
-      (`src/serving/inference.py`)
-- [x] FastAPI service that loads the saved model and serves predictions
-- [x] Docker image for the service
-- [x] CI with GitHub Actions (tests and Docker build on every push)
-- [x] Gradio web UI that calls the API
-- [ ] Deploy the API and UI to AWS
-
-## Troubleshooting
-
-- **`Library not loaded: libomp.dylib` (macOS).** Run `brew install libomp`.
-- **MLflow says the file store is deprecated or raises an error.** The pipeline
-  already handles this. For `mlflow ui`, set `MLFLOW_ALLOW_FILE_STORE=true` as
-  shown above.
-- **Port 5000 is already in use (common on macOS, where AirPlay uses it).**
-  Add `--port 5001` to the `mlflow ui` command.
-- **`File not found: data/raw/...`.** The dataset is missing; see step 3.
-- **Pipeline stops with "Data quality check failed".** The data broke one of
-  the validation rules. The message lists which checks failed.
+The data files, `artifacts/` and `mlruns/` are created when you run the
+pipeline and are listed in `.gitignore`. The small `model/` bundle is the
+exception: it is committed, so the service can be built and deployed without
+retraining.
 
 ## License
 
-Released under the [MIT License](LICENSE).
-
-## Versions
-
-Direct dependencies are pinned in `requirements.txt` to the versions the
-project was developed and tested with (Python 3.11, pandas 3.0,
-scikit-learn 1.9, XGBoost 3.2, MLflow 3.16, Great Expectations 1.23,
-Optuna 5.0, FastAPI 0.141, Pydantic 2.13). The Docker image uses
-`requirements-serving.txt`, which is pinned separately and kept small.
+[MIT](LICENSE)
