@@ -26,6 +26,7 @@ Actions, and deployed to AWS ECS.
 
 - **Live demo:** https://ch-2be24e3703004356be1576050507f7de.ecs.eu-west-1.on.aws/ui
 <!-- - **Hugging Face Spaces:** TODO -->
+- **Video walkthrough:** https://youtu.be/hV0WRf2hB18
 - **Docker:** `docker pull sadiaparveen/customer-churn-mlops:latest`
 
 <!-- TODO: add screenshots, e.g. ![Web UI](docs/images/ui.png) and ![ECS service](docs/images/ecs.png) -->
